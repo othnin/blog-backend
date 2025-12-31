@@ -51,7 +51,6 @@ INSTALLED_APPS = [
     "ninja_extra",
     "ninja_jwt",
     # internal
-    "waitlists",
 ]
 
 MIDDLEWARE = [
