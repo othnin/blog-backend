@@ -47,10 +47,11 @@ INSTALLED_APPS = [
     "django.contrib.messages",
     "django.contrib.staticfiles",
     # third party
-     "corsheaders",
+    "corsheaders",
     "ninja_extra",
     "ninja_jwt",
     # internal
+    "auth_app",
 ]
 
 MIDDLEWARE = [
@@ -76,7 +77,7 @@ for origin in ENV_CORS_ALLOWED_ORIGINS.split(","):
 TEMPLATES = [
     {
         "BACKEND": "django.template.backends.django.DjangoTemplates",
-        "DIRS": [],
+        "DIRS": [BASE_DIR / "templates"],
         "APP_DIRS": True,
         "OPTIONS": {
             "context_processors": [
@@ -159,3 +160,22 @@ NINJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=7),
 }
+
+# Email Configuration
+# https://docs.djangoproject.com/en/5.0/topics/email/
+
+EMAIL_BACKEND = config("EMAIL_BACKEND", cast=str, default="django.core.mail.backends.console.EmailBackend")
+EMAIL_HOST = config("EMAIL_HOST", cast=str, default="localhost")
+EMAIL_PORT = config("EMAIL_PORT", cast=int, default=1025)
+EMAIL_USE_TLS = config("EMAIL_USE_TLS", cast=bool, default=False)
+EMAIL_USE_SSL = config("EMAIL_USE_SSL", cast=bool, default=False)
+EMAIL_HOST_USER = config("EMAIL_HOST_USER", cast=str, default="")
+EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", cast=str, default="")
+DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", cast=str, default="noreply@gardenblog.com")
+
+# Frontend URL for email links
+FRONTEND_URL = config("FRONTEND_URL", cast=str, default="http://localhost:3000")
+
+# Auth settings
+# In development, skip email verification to make testing easier
+SKIP_EMAIL_VERIFICATION = config("SKIP_EMAIL_VERIFICATION", cast=bool, default=config("DJANGO_DEBUG", cast=bool, default=False))
