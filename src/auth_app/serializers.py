@@ -16,7 +16,7 @@ class RegisterSerializer(BaseModel):
     email: EmailStr
     password: str
     password_confirm: str
-    username: Optional[str] = None
+    username: str
 
     @field_validator('password', mode='before')
     @classmethod

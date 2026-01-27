@@ -50,7 +50,7 @@ def register(request, data: RegisterSerializer):
     - email: Valid email address (must be unique)
     - password: At least 8 chars, with uppercase, lowercase, and digit
     - password_confirm: Must match password
-    - username: Optional, auto-generated from email if not provided
+    - username: Required, unique username
     
     Response:
     - Returns new user data on success
@@ -62,6 +62,14 @@ def register(request, data: RegisterSerializer):
             return {
                 'status': 'error',
                 'message': 'User with this email already exists',
+                'user': None
+            }
+        
+        # Check if username already exists
+        if User.objects.filter(username=data.username).exists():
+            return {
+                'status': 'error',
+                'message': 'Username already exists',
                 'user': None
             }
         
