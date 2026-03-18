@@ -1,11 +1,13 @@
 import helpers
 from ninja import NinjaAPI, Schema, Router
 from pydantic import ValidationError as PydanticValidationError
+from typing import Optional
 
 from ninja_extra import NinjaExtraAPI
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.tokens import RefreshToken
 from auth_app.api import router as auth_router
+from blog.api import BlogController
 from auth_app.serializers import LoginSerializer
 from django.http import JsonResponse
 from django.contrib.auth import authenticate
@@ -118,12 +120,14 @@ def obtain_token_pair(request, data: LoginSerializer):
 
 api.add_router("/token/", token_router)
 api.add_router("/auth/", auth_router)
+api.register_controllers(BlogController)
 
 class UserSchema(Schema):
     username: str
     is_authenticated: bool
     # is not requst.user.is_authenticated
     email: str = None
+    profile: Optional[dict] = None
 
 @api.get("/hello")
 def hello(request):
@@ -134,4 +138,21 @@ def hello(request):
     response=UserSchema, 
     auth=helpers.api_auth_user_required)
 def me(request):
-    return request.user
+    user = request.user
+    profile_data = None
+    try:
+        profile = user.profile
+        profile_data = {
+            'role': profile.role,
+            'avatar': profile.avatar,
+            'email_verified': profile.email_verified,
+        }
+    except:
+        pass
+    
+    return {
+        'username': user.username,
+        'email': user.email,
+        'is_authenticated': user.is_authenticated,
+        'profile': profile_data,
+    }

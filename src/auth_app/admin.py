@@ -31,7 +31,7 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
 
 @admin.register(UserProfile)
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'email_verified', 'created_at', 'updated_at')
+    list_display = ('user', 'email_verified', 'created_at', 'updated_at', 'role', 'avatar')
     list_filter = ('email_verified', 'created_at')
     search_fields = ('user__email', 'user__username')
     readonly_fields = ('created_at', 'updated_at')

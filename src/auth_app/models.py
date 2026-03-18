@@ -58,10 +58,18 @@ class PasswordResetToken(models.Model):
 
 class UserProfile(models.Model):
     """
-    Extended user profile to track email verification status.
+    Extended user profile to track email verification status, avatar, and blog role.
     """
+    ROLE_CHOICES = [
+        ('reader', 'Reader'),
+        ('editor', 'Editor'),
+        ('admin', 'Admin'),
+    ]
+    
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     email_verified = models.BooleanField(default=False)
+    avatar = models.URLField(blank=True, null=True, help_text='URL to user avatar image')
+    role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='reader', help_text='Blog role: reader (read-only), editor (can create/edit own), admin (full access)')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

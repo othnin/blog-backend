@@ -482,6 +482,93 @@ class TokenModelTests(TestCase):
             email='newuser@example.com',
             password='ValidPass123'
         )
-        
+
         self.assertTrue(hasattr(new_user, 'profile'))
         self.assertFalse(new_user.profile.email_verified)
+
+
+class JWTTokenTests(TestCase):
+    """Tests for JWT login endpoint and token-protected routes."""
+
+    def setUp(self):
+        self.client = Client()
+        self.token_url = '/api/token/pair'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def test_login_with_username_returns_tokens(self):
+        """Successful login returns access and refresh tokens."""
+        data = {'username': 'testuser', 'password': 'ValidPass123'}
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 200)
+        response_data = json.loads(response.content)
+        self.assertIn('access', response_data)
+        self.assertIn('refresh', response_data)
+
+    def test_login_with_email_returns_tokens(self):
+        """Login accepts email as the username field."""
+        data = {'username': 'testuser@example.com', 'password': 'ValidPass123'}
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 200)
+        response_data = json.loads(response.content)
+        self.assertIn('access', response_data)
+
+    def test_login_invalid_password_returns_401(self):
+        """Wrong password is rejected."""
+        data = {'username': 'testuser', 'password': 'WrongPass999'}
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_login_nonexistent_user_returns_401(self):
+        """Non-existent username is rejected."""
+        data = {'username': 'nobody', 'password': 'ValidPass123'}
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_login_unverified_email_blocked_when_verification_required(self):
+        """User with unverified email cannot log in when SKIP_EMAIL_VERIFICATION is False."""
+        from django.test import override_settings
+        self.user.profile.email_verified = False
+        self.user.profile.save()
+        data = {'username': 'testuser', 'password': 'ValidPass123'}
+        with override_settings(SKIP_EMAIL_VERIFICATION=False):
+            response = self.client.post(
+                self.token_url,
+                data=json.dumps(data),
+                content_type='application/json'
+            )
+        self.assertEqual(response.status_code, 401)
+
+    def test_protected_endpoint_without_token_returns_403(self):
+        """Unauthenticated requests to protected endpoints return 403 (IsAuthenticated permission)."""
+        response = self.client.get('/api/blog/my-posts/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_protected_endpoint_with_invalid_token_returns_403(self):
+        """Requests with a malformed Bearer token to protected endpoints return 403."""
+        response = self.client.get(
+            '/api/blog/my-posts/',
+            HTTP_AUTHORIZATION='Bearer not.a.real.token'
+        )
+        self.assertEqual(response.status_code, 403)

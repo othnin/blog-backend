@@ -319,3 +319,33 @@ def password_reset_confirm(request, data: PasswordResetConfirmSerializer):
             'status': 'error',
             'message': f'Password reset failed: {str(e)}',
         }
+
+@router.get("/me", response=UserResponseSchema, auth=JWTAuth())
+def get_current_user(request):
+    """
+    Get the current authenticated user's information.
+    
+    Requires JWT authentication.
+    
+    Response:
+    - Returns current user data on success
+    """
+    user = request.user
+    
+    try:
+        profile = user.profile
+        role = profile.role
+    except UserProfile.DoesNotExist:
+        role = 'reader'
+    
+    return {
+        'id': user.id,
+        'username': user.username,
+        'email': user.email,
+        'first_name': user.first_name,
+        'last_name': user.last_name,
+        'profile': {
+            'role': role,
+            'avatar': getattr(profile, 'avatar', None) if hasattr(user, 'profile') else None,
+        }
+    }

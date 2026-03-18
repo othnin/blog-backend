@@ -111,6 +111,7 @@ class UserResponseSchema(BaseModel):
     username: str
     email: str
     email_verified: bool = False
+    profile: Optional[dict] = None
 
     class Config:
         from_attributes = True

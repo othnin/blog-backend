@@ -52,6 +52,7 @@ INSTALLED_APPS = [
     "ninja_jwt",
     # internal
     "auth_app",
+    "blog",
 ]
 
 MIDDLEWARE = [
@@ -68,10 +69,20 @@ MIDDLEWARE = [
 ROOT_URLCONF = "home.urls"
 
 CORS_URLS_REGEX = r"^/api/.*$"
-CORS_ALLOWED_ORIGINS = []
-ENV_CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", cast=str, default="")
-for origin in ENV_CORS_ALLOWED_ORIGINS.split(","):
-    CORS_ALLOWED_ORIGINS.append(f"{origin}".strip().lower())
+
+# In development, allow all origins for easier testing
+if DEBUG:
+    CORS_ALLOW_ALL_ORIGINS = True
+else:
+    # In production, specify allowed origins
+    CORS_ALLOW_ALL_ORIGINS = False
+    CORS_ALLOWED_ORIGINS = []
+    ENV_CORS_ALLOWED_ORIGINS = config("CORS_ALLOWED_ORIGINS", cast=str, default="")
+    for origin in ENV_CORS_ALLOWED_ORIGINS.split(","):
+        if origin.strip():
+            CORS_ALLOWED_ORIGINS.append(f"{origin}".strip().lower())
+
+CORS_ALLOW_CREDENTIALS = True
 
 
 TEMPLATES = [
