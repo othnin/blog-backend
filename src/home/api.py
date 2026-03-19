@@ -108,6 +108,7 @@ def obtain_token_pair(request, data: LoginSerializer):
         return {
             'refresh': str(refresh),
             'access': str(refresh.access_token),
+            'username': user.username,
         }
     except Exception as e:
         import traceback
