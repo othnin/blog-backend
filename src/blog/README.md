@@ -196,7 +196,7 @@ The JSON is validated on API input and can be rendered directly by Lexical on th
 ### Create a Blog Post (as Editor)
 
 ```bash
-curl -X POST http://localhost:8000/api/blog/posts/ \
+curl -X POST http://localhost:8001/api/blog/posts/ \
   -H "Authorization: Bearer {token}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -211,7 +211,7 @@ curl -X POST http://localhost:8000/api/blog/posts/ \
 ### Publish a Draft Post
 
 ```bash
-curl -X PUT http://localhost:8000/api/blog/posts/1/ \
+curl -X PUT http://localhost:8001/api/blog/posts/1/ \
   -H "Authorization: Bearer {token}" \
   -H "Content-Type: application/json" \
   -d '{
@@ -222,7 +222,7 @@ curl -X PUT http://localhost:8000/api/blog/posts/1/ \
 ### Get Published Posts
 
 ```bash
-curl http://localhost:8000/api/blog/posts/
+curl http://localhost:8001/api/blog/posts/
 ```
 
 ## Utility Functions

@@ -61,13 +61,13 @@ cd /home/achilles/Documents/blog/backend
 python manage.py createsuperuser
 ```
 
-Then visit: http://localhost:8000/admin/
+Then visit: http://localhost:8001/admin/
 
 ## API Endpoints
 
 ### Register New User
 ```bash
-curl -X POST http://localhost:8000/api/auth/register/ \
+curl -X POST http://localhost:8001/api/auth/register/ \
   -H "Content-Type: application/json" \
   -d '{
     "email": "newuser@example.com",
@@ -94,7 +94,7 @@ curl -X POST http://localhost:8000/api/auth/register/ \
 ### Verify Email
 ```bash
 # Get token from console output when EMAIL_BACKEND is console
-curl -X POST http://localhost:8000/api/auth/verify-email/ \
+curl -X POST http://localhost:8001/api/auth/verify-email/ \
   -H "Content-Type: application/json" \
   -d '{
     "token": "PASTE_TOKEN_HERE"
@@ -103,7 +103,7 @@ curl -X POST http://localhost:8000/api/auth/verify-email/ \
 
 ### Request Password Reset
 ```bash
-curl -X POST http://localhost:8000/api/auth/password-reset-request/ \
+curl -X POST http://localhost:8001/api/auth/password-reset-request/ \
   -H "Content-Type: application/json" \
   -d '{
     "email": "newuser@example.com"
@@ -113,7 +113,7 @@ curl -X POST http://localhost:8000/api/auth/password-reset-request/ \
 ### Confirm Password Reset
 ```bash
 # Get token from console output
-curl -X POST http://localhost:8000/api/auth/password-reset-confirm/ \
+curl -X POST http://localhost:8001/api/auth/password-reset-confirm/ \
   -H "Content-Type: application/json" \
   -d '{
     "token": "PASTE_TOKEN_HERE",
@@ -139,7 +139,7 @@ The Django admin interface includes pages for managing tokens:
    - View email verification status
    - See created/updated timestamps
 
-Visit: http://localhost:8000/admin/
+Visit: http://localhost:8001/admin/
 
 ## Testing Workflow
 
@@ -147,7 +147,7 @@ Visit: http://localhost:8000/admin/
 
 1. **Register user**:
    ```bash
-   curl -X POST http://localhost:8000/api/auth/register/ \
+   curl -X POST http://localhost:8001/api/auth/register/ \
      -H "Content-Type: application/json" \
      -d '{"email": "test@example.com", "password": "TestPass123", "password_confirm": "TestPass123"}'
    ```
@@ -158,21 +158,21 @@ Visit: http://localhost:8000/admin/
 
 4. **Verify email**:
    ```bash
-   curl -X POST http://localhost:8000/api/auth/verify-email/ \
+   curl -X POST http://localhost:8001/api/auth/verify-email/ \
      -H "Content-Type: application/json" \
      -d '{"token": "TOKEN_HERE"}'
    ```
 
 5. **Request password reset**:
    ```bash
-   curl -X POST http://localhost:8000/api/auth/password-reset-request/ \
+   curl -X POST http://localhost:8001/api/auth/password-reset-request/ \
      -H "Content-Type: application/json" \
      -d '{"email": "test@example.com"}'
    ```
 
 6. **Confirm password reset**:
    ```bash
-   curl -X POST http://localhost:8000/api/auth/password-reset-confirm/ \
+   curl -X POST http://localhost:8001/api/auth/password-reset-confirm/ \
      -H "Content-Type: application/json" \
      -d '{"token": "RESET_TOKEN_HERE", "new_password": "NewPass456", "new_password_confirm": "NewPass456"}'
    ```

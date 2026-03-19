@@ -56,7 +56,7 @@ ARG PROJ_NAME="home"
 # this script will execute at runtime when
 # the container starts and the database is available
 RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
-    printf "RUN_PORT=\"\${PORT:-8000}\"\n\n" >> ./paracord_runner.sh && \
+    printf "RUN_PORT=\"\${PORT:-8001}\"\n\n" >> ./paracord_runner.sh && \
     printf "python manage.py migrate --no-input\n" >> ./paracord_runner.sh && \
     printf "gunicorn ${PROJ_NAME}.wsgi:application --bind \"0.0.0.0:\$RUN_PORT\"\n" >> ./paracord_runner.sh
 
