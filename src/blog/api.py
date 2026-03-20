@@ -5,6 +5,7 @@ Handles creation, reading, updating, and deletion of blog posts.
 from ninja.errors import HttpError
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
 from ninja_extra.permissions import IsAuthenticated
+from .permissions import IsEditorOrAdmin
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from typing import List, Optional
@@ -81,7 +82,7 @@ class BlogController:
     @http_post(
         "/posts/",
         response=BlogPostOut,
-        permissions=[IsAuthenticated],
+        permissions=[IsAuthenticated, IsEditorOrAdmin],
         description="Create a new blog post"
     )
     def create_post(self, payload: BlogPostCreateIn) -> BlogPostOut:
@@ -93,17 +94,6 @@ class BlogController:
         """
         request = self.context.request
         user = request.user
-        
-        print(f"DEBUG: create_post user={user} is_authenticated={user.is_authenticated}")
-
-        # Check user role
-        if not hasattr(user, 'profile'):
-            raise HttpError(403, "User profile not found")
-
-        role = user.profile.role
-        print(f"DEBUG: create_post role={role}")
-        if role not in ['editor', 'admin']:
-            raise HttpError(403, f"Users with role '{role}' cannot create blog posts. Only editors and admins can.")
 
         # Create unique slug
         slug = create_unique_slug(payload.title)
@@ -128,7 +118,7 @@ class BlogController:
     @http_put(
         "/posts/{slug}/",
         response=BlogPostOut,
-        permissions=[IsAuthenticated],
+        permissions=[IsAuthenticated, IsEditorOrAdmin],
         description="Update a blog post"
     )
     def update_post(self, slug: str, payload: BlogPostUpdateIn) -> BlogPostOut:
@@ -172,7 +162,7 @@ class BlogController:
 
     @http_delete(
         "/posts/{slug}/",
-        permissions=[IsAuthenticated],
+        permissions=[IsAuthenticated, IsEditorOrAdmin],
         description="Delete a blog post"
     )
     def delete_post(self, slug: str) -> dict:

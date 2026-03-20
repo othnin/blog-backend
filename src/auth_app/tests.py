@@ -572,3 +572,197 @@ class JWTTokenTests(TestCase):
             HTTP_AUTHORIZATION='Bearer not.a.real.token'
         )
         self.assertEqual(response.status_code, 403)
+
+
+class JWTRefreshTests(TestCase):
+    """Tests for POST /api/token/refresh — token refresh and rotation."""
+
+    def setUp(self):
+        self.client = Client()
+        self.token_url = '/api/token/pair'
+        self.refresh_url = '/api/token/refresh'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _get_tokens(self):
+        """Helper: log in and return (access, refresh) token strings."""
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser', 'password': 'ValidPass123'}),
+            content_type='application/json'
+        )
+        data = json.loads(response.content)
+        return data['access'], data['refresh']
+
+    def test_valid_refresh_token_returns_new_access_token(self):
+        """A valid refresh token yields a fresh access token."""
+        _, refresh = self._get_tokens()
+        response = self.client.post(
+            self.refresh_url,
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertIn('access', data)
+
+    def test_rotation_returns_new_refresh_token(self):
+        """With ROTATE_REFRESH_TOKENS=True, refresh also returns a new refresh token."""
+        from django.test import override_settings
+        import datetime
+        with override_settings(NINJA_JWT={
+            'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=60),
+            'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=7),
+            'ROTATE_REFRESH_TOKENS': True,
+            'BLACKLIST_AFTER_ROTATION': True,
+        }):
+            _, refresh = self._get_tokens()
+            response = self.client.post(
+                self.refresh_url,
+                data=json.dumps({'refresh': refresh}),
+                content_type='application/json'
+            )
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertIn('refresh', data)
+        self.assertNotEqual(data['refresh'], refresh)
+
+    def test_rotated_old_refresh_token_is_rejected(self):
+        """After rotation, the original refresh token cannot be reused."""
+        from django.test import override_settings
+        import datetime
+        with override_settings(NINJA_JWT={
+            'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=60),
+            'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=7),
+            'ROTATE_REFRESH_TOKENS': True,
+            'BLACKLIST_AFTER_ROTATION': True,
+        }):
+            _, refresh = self._get_tokens()
+            # First use — rotates the token
+            self.client.post(
+                self.refresh_url,
+                data=json.dumps({'refresh': refresh}),
+                content_type='application/json'
+            )
+            # Second use of the original token — must be rejected
+            response = self.client.post(
+                self.refresh_url,
+                data=json.dumps({'refresh': refresh}),
+                content_type='application/json'
+            )
+        self.assertEqual(response.status_code, 401)
+
+    def test_invalid_refresh_token_returns_401(self):
+        """A garbage string is rejected with 401."""
+        response = self.client.post(
+            self.refresh_url,
+            data=json.dumps({'refresh': 'not.a.real.token'}),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_missing_refresh_field_returns_error(self):
+        """Request body without a 'refresh' field is rejected."""
+        response = self.client.post(
+            self.refresh_url,
+            data=json.dumps({}),
+            content_type='application/json'
+        )
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_refreshed_access_token_grants_protected_access(self):
+        """Access token obtained via refresh can authenticate protected endpoints."""
+        _, refresh = self._get_tokens()
+        refresh_response = self.client.post(
+            self.refresh_url,
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json'
+        )
+        new_access = json.loads(refresh_response.content)['access']
+        protected_response = self.client.get(
+            '/api/me',
+            HTTP_AUTHORIZATION=f'Bearer {new_access}'
+        )
+        self.assertEqual(protected_response.status_code, 200)
+
+
+class JWTBlacklistTests(TestCase):
+    """Tests for POST /api/token/blacklist — logout token revocation."""
+
+    def setUp(self):
+        self.client = Client()
+        self.token_url = '/api/token/pair'
+        self.refresh_url = '/api/token/refresh'
+        self.blacklist_url = '/api/token/blacklist'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _get_tokens(self):
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser', 'password': 'ValidPass123'}),
+            content_type='application/json'
+        )
+        data = json.loads(response.content)
+        return data['access'], data['refresh']
+
+    def test_blacklist_valid_refresh_token_returns_200(self):
+        """Blacklisting a valid refresh token succeeds."""
+        _, refresh = self._get_tokens()
+        response = self.client.post(
+            self.blacklist_url,
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_blacklisted_token_cannot_be_used_to_refresh(self):
+        """A token that has been blacklisted is rejected by the refresh endpoint."""
+        _, refresh = self._get_tokens()
+        # Blacklist the token
+        self.client.post(
+            self.blacklist_url,
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json'
+        )
+        # Attempt to refresh with the now-blacklisted token
+        response = self.client.post(
+            self.refresh_url,
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_blacklist_invalid_token_returns_400(self):
+        """Attempting to blacklist a garbage token returns 400."""
+        response = self.client.post(
+            self.blacklist_url,
+            data=json.dumps({'refresh': 'garbage.token.value'}),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_blacklist_already_blacklisted_token_returns_400(self):
+        """Double-blacklisting the same token returns 400 on the second attempt."""
+        _, refresh = self._get_tokens()
+        self.client.post(
+            self.blacklist_url,
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json'
+        )
+        response = self.client.post(
+            self.blacklist_url,
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 400)

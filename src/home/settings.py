@@ -50,6 +50,7 @@ INSTALLED_APPS = [
     "corsheaders",
     "ninja_extra",
     "ninja_jwt",
+    "ninja_jwt.token_blacklist",
     # internal
     "auth_app",
     "blog",
@@ -170,6 +171,8 @@ DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 NINJA_JWT = {
     'ACCESS_TOKEN_LIFETIME': datetime.timedelta(minutes=60),
     'REFRESH_TOKEN_LIFETIME': datetime.timedelta(days=7),
+    'ROTATE_REFRESH_TOKENS': True,
+    'BLACKLIST_AFTER_ROTATION': True,
 }
 
 # Email Configuration
