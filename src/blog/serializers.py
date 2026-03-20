@@ -56,6 +56,11 @@ class UserWithProfileOut(UserBasicOut):
             return None
 
 
+class CategoryCreateIn(BaseModel):
+    """Input serializer for creating a category."""
+    name: str = Field(..., min_length=1, max_length=100)
+
+
 class BlogPostCreateIn(BaseModel):
     """Input serializer for creating a blog post."""
     title: str = Field(..., min_length=1, max_length=500)

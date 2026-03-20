@@ -5,6 +5,7 @@ Handles creation, reading, updating, and deletion of blog posts.
 from ninja.errors import HttpError
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
 from ninja_extra.permissions import IsAuthenticated
+from ninja_jwt.authentication import JWTAuth
 from .permissions import IsEditorOrAdmin
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
@@ -16,6 +17,7 @@ from .serializers import (
     BlogPostOut,
     BlogPostListOut,
     CategoryOut,
+    CategoryCreateIn,
 )
 from .utils import (
     create_unique_slug,
@@ -43,6 +45,25 @@ class BlogController:
         """Retrieve all blog categories."""
         categories = Category.objects.all().order_by('name')
         return categories
+
+    @http_post(
+        "/categories/",
+        response=CategoryOut,
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated, IsEditorOrAdmin],
+        description="Create a new category"
+    )
+    def create_category(self, payload: CategoryCreateIn) -> CategoryOut:
+        """
+        Create a new blog category.
+        - Requires editor or admin role
+        - If a category with the same name already exists, returns the existing one
+        """
+        from django.utils.text import slugify
+        name = payload.name.strip()
+        slug = slugify(name)
+        category, _ = Category.objects.get_or_create(slug=slug, defaults={'name': name})
+        return category
 
     # ============= Blog Post Endpoints =============
 
@@ -82,6 +103,7 @@ class BlogController:
     @http_post(
         "/posts/",
         response=BlogPostOut,
+        auth=JWTAuth(),
         permissions=[IsAuthenticated, IsEditorOrAdmin],
         description="Create a new blog post"
     )
@@ -118,6 +140,7 @@ class BlogController:
     @http_put(
         "/posts/{slug}/",
         response=BlogPostOut,
+        auth=JWTAuth(),
         permissions=[IsAuthenticated, IsEditorOrAdmin],
         description="Update a blog post"
     )
@@ -162,6 +185,7 @@ class BlogController:
 
     @http_delete(
         "/posts/{slug}/",
+        auth=JWTAuth(),
         permissions=[IsAuthenticated, IsEditorOrAdmin],
         description="Delete a blog post"
     )
@@ -188,6 +212,7 @@ class BlogController:
     @http_get(
         "/my-posts/",
         response=List[BlogPostListOut],
+        auth=JWTAuth(),
         permissions=[IsAuthenticated],
         description="Get current user's blog posts"
     )
