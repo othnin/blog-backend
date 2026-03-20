@@ -49,19 +49,20 @@ class RegistrationTests(TestCase):
         self.assertFalse(user.profile.email_verified)
     
     def test_register_auto_username(self):
-        """Test registration with auto-generated username."""
+        """Empty username string triggers auto-generation from the email local part."""
         data = {
             'email': 'newuser@example.com',
             'password': 'ValidPass123',
             'password_confirm': 'ValidPass123',
+            'username': '',  # blank → set_username validator generates from email
         }
-        
+
         response = self.client.post(
             self.register_url,
             data=json.dumps(data),
             content_type='application/json'
         )
-        
+
         self.assertEqual(response.status_code, 200)
         user = User.objects.get(email='newuser@example.com')
         self.assertEqual(user.username, 'newuser')
@@ -74,19 +75,20 @@ class RegistrationTests(TestCase):
             email='existing@example.com',
             password='ValidPass123'
         )
-        
+
         data = {
             'email': 'existing@example.com',
             'password': 'ValidPass123',
             'password_confirm': 'ValidPass123',
+            'username': 'someone',
         }
-        
+
         response = self.client.post(
             self.register_url,
             data=json.dumps(data),
             content_type='application/json'
         )
-        
+
         response_data = json.loads(response.content)
         self.assertEqual(response_data['status'], 'error')
         self.assertIn('already exists', response_data['message'])
@@ -135,22 +137,201 @@ class RegistrationTests(TestCase):
             self.assertNotEqual(response.status_code, 200)
     
     def test_register_sends_verification_email(self):
-        """Test that registration sends verification email."""
+        """Registration dispatches exactly one verification email to the registrant."""
+        from django.test import override_settings
         data = {
             'email': 'testuser@example.com',
             'password': 'ValidPass123',
             'password_confirm': 'ValidPass123',
+            'username': 'testuser',
         }
-        
+
+        with override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend'):
+            self.client.post(
+                self.register_url,
+                data=json.dumps(data),
+                content_type='application/json'
+            )
+
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['testuser@example.com'])
+
+
+    def test_register_duplicate_username_auto_incremented(self):
+        """When the requested username is taken, the serializer auto-increments it
+        (e.g. 'taken' → 'taken1') and registration succeeds."""
+        User.objects.create_user(
+            username='taken',
+            email='taken@example.com',
+            password='ValidPass123'
+        )
+
+        data = {
+            'email': 'other@example.com',
+            'password': 'ValidPass123',
+            'password_confirm': 'ValidPass123',
+            'username': 'taken',
+        }
+
         response = self.client.post(
             self.register_url,
             data=json.dumps(data),
             content_type='application/json'
         )
-        
-        # Check email was sent (requires EMAIL_BACKEND set to console or similar in tests)
-        # This test assumes mail backend is configured
-        # In real tests, mock the send_mail function
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'success')
+        # Username should have been deduplicated
+        created_user = User.objects.get(email='other@example.com')
+        self.assertNotEqual(created_user.username, 'taken')
+        self.assertTrue(created_user.username.startswith('taken'))
+
+    def test_register_response_shape(self):
+        """Successful registration response includes status, message, and user object."""
+        data = {
+            'email': 'shaped@example.com',
+            'password': 'ValidPass123',
+            'password_confirm': 'ValidPass123',
+            'username': 'shaped',
+        }
+
+        response = self.client.post(
+            self.register_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'success')
+        self.assertIn('message', body)
+        user = body['user']
+        self.assertIn('id', user)
+        self.assertEqual(user['username'], 'shaped')
+        self.assertEqual(user['email'], 'shaped@example.com')
+        self.assertFalse(user['email_verified'])
+
+    def test_register_invalid_email_format(self):
+        """A malformed email address is rejected before reaching the view."""
+        data = {
+            'email': 'not-an-email',
+            'password': 'ValidPass123',
+            'password_confirm': 'ValidPass123',
+            'username': 'anyuser',
+        }
+
+        response = self.client.post(
+            self.register_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_register_creates_verification_token(self):
+        """A valid registration creates exactly one EmailVerificationToken for the user."""
+        data = {
+            'email': 'tokencheck@example.com',
+            'password': 'ValidPass123',
+            'password_confirm': 'ValidPass123',
+            'username': 'tokencheck',
+        }
+
+        self.client.post(
+            self.register_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+
+        user = User.objects.get(email='tokencheck@example.com')
+        self.assertEqual(EmailVerificationToken.objects.filter(user=user).count(), 1)
+        token = EmailVerificationToken.objects.get(user=user)
+        self.assertTrue(token.is_valid())
+
+
+# ---------------------------------------------------------------------------
+# Auth Login Tests  (/api/auth/login)
+# ---------------------------------------------------------------------------
+
+class AuthLoginTests(TestCase):
+    """Tests for POST /api/auth/login — session-style login returning user data."""
+
+    def setUp(self):
+        self.client = Client()
+        self.login_url = '/api/auth/login'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _post(self, data):
+        return self.client.post(
+            self.login_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+
+    def test_login_success(self):
+        """Verified user with correct credentials receives a success response."""
+        response = self._post({'username': 'testuser', 'password': 'ValidPass123'})
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'success')
+
+    def test_login_response_shape(self):
+        """Success response includes status, message, and a populated user object."""
+        response = self._post({'username': 'testuser', 'password': 'ValidPass123'})
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'success')
+        self.assertIn('message', body)
+        user = body['user']
+        self.assertIn('id', user)
+        self.assertEqual(user['username'], 'testuser')
+        self.assertEqual(user['email'], 'testuser@example.com')
+
+    def test_login_wrong_password(self):
+        """Wrong password returns status error."""
+        response = self._post({'username': 'testuser', 'password': 'WrongPass999'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['status'], 'error')
+
+    def test_login_nonexistent_user(self):
+        """Non-existent username returns status error."""
+        response = self._post({'username': 'nobody', 'password': 'ValidPass123'})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['status'], 'error')
+
+    def test_login_unverified_email(self):
+        """User with unverified email is rejected with an error message."""
+        self.user.profile.email_verified = False
+        self.user.profile.save()
+
+        response = self._post({'username': 'testuser', 'password': 'ValidPass123'})
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIn('verified', body['message'].lower())
+
+    def test_login_missing_password_field(self):
+        """Request body without a password field is rejected at the serializer level."""
+        response = self._post({'username': 'testuser'})
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_login_missing_username_field(self):
+        """Request body without a username field is rejected at the serializer level."""
+        response = self._post({'password': 'ValidPass123'})
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_login_does_not_return_jwt_tokens(self):
+        """This endpoint validates identity but does not issue JWT tokens."""
+        response = self._post({'username': 'testuser', 'password': 'ValidPass123'})
+        body = json.loads(response.content)
+        self.assertNotIn('access', body)
+        self.assertNotIn('refresh', body)
 
 
 class EmailVerificationTests(TestCase):
@@ -232,17 +413,60 @@ class EmailVerificationTests(TestCase):
         token = create_email_verification_token(self.user)
         token.is_used = True
         token.save()
-        
+
         data = {'token': token.token}
-        
+
         response = self.client.post(
             self.verify_url,
             data=json.dumps(data),
             content_type='application/json'
         )
-        
+
         response_data = json.loads(response.content)
         self.assertEqual(response_data['status'], 'error')
+
+    def test_verify_email_response_includes_user_data(self):
+        """Successful verification returns a user object in the response."""
+        token = create_email_verification_token(self.user)
+
+        response = self.client.post(
+            self.verify_url,
+            data=json.dumps({'token': token.token}),
+            content_type='application/json'
+        )
+
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'success')
+        user = body['user']
+        self.assertEqual(user['username'], 'testuser')
+        self.assertEqual(user['email'], 'testuser@example.com')
+        self.assertTrue(user['email_verified'])
+
+    def test_verify_email_already_verified_user(self):
+        """A user whose email is already verified can still consume a fresh valid token."""
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+        token = create_email_verification_token(self.user)
+
+        response = self.client.post(
+            self.verify_url,
+            data=json.dumps({'token': token.token}),
+            content_type='application/json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['status'], 'success')
+
+    def test_verify_email_empty_token(self):
+        """An empty token string is rejected."""
+        response = self.client.post(
+            self.verify_url,
+            data=json.dumps({'token': ''}),
+            content_type='application/json'
+        )
+
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
 
 
 class PasswordResetTests(TestCase):
@@ -386,29 +610,237 @@ class PasswordResetTests(TestCase):
     def test_password_reset_confirm_weak_password(self):
         """Test password reset fails with weak new password."""
         token = create_password_reset_token(self.user)
-        
+
         weak_passwords = [
             ('short', 'short'),
             ('nouppercase123', 'nouppercase123'),
             ('NOLOWERCASE123', 'NOLOWERCASE123'),
             ('NoDigits', 'NoDigits'),
         ]
-        
+
         for weak_pass, confirm in weak_passwords:
             data = {
                 'token': token.token,
                 'new_password': weak_pass,
                 'new_password_confirm': confirm,
             }
-            
+
             response = self.client.post(
                 self.reset_confirm_url,
                 data=json.dumps(data),
                 content_type='application/json'
             )
-            
+
             # Validation errors return 422 with Ninja's default error format
             self.assertNotEqual(response.status_code, 200)
+
+    def test_password_reset_confirm_used_token_rejected(self):
+        """A token that has already been used to reset a password cannot be reused."""
+        token = create_password_reset_token(self.user)
+        token.is_used = True
+        token.save()
+
+        data = {
+            'token': token.token,
+            'new_password': 'NewPass123',
+            'new_password_confirm': 'NewPass123',
+        }
+
+        response = self.client.post(
+            self.reset_confirm_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+
+    def test_password_reset_confirm_allows_login_with_new_password(self):
+        """After a successful reset the user can log in with the new password."""
+        token = create_password_reset_token(self.user)
+
+        self.client.post(
+            self.reset_confirm_url,
+            data=json.dumps({
+                'token': token.token,
+                'new_password': 'BrandNew456',
+                'new_password_confirm': 'BrandNew456',
+            }),
+            content_type='application/json'
+        )
+
+        login_response = self.client.post(
+            '/api/token/pair',
+            data=json.dumps({'username': 'testuser', 'password': 'BrandNew456'}),
+            content_type='application/json'
+        )
+        self.assertEqual(login_response.status_code, 200)
+        self.assertIn('access', json.loads(login_response.content))
+
+    def test_password_reset_confirm_old_password_no_longer_works(self):
+        """After reset, the original password is rejected."""
+        token = create_password_reset_token(self.user)
+
+        self.client.post(
+            self.reset_confirm_url,
+            data=json.dumps({
+                'token': token.token,
+                'new_password': 'BrandNew456',
+                'new_password_confirm': 'BrandNew456',
+            }),
+            content_type='application/json'
+        )
+
+        login_response = self.client.post(
+            '/api/token/pair',
+            data=json.dumps({'username': 'testuser', 'password': 'OldPass123'}),
+            content_type='application/json'
+        )
+        self.assertEqual(login_response.status_code, 401)
+
+    def test_password_reset_request_invalid_email_format(self):
+        """A malformed email in the reset request is rejected by the serializer."""
+        response = self.client.post(
+            self.reset_request_url,
+            data=json.dumps({'email': 'not-an-email'}),
+            content_type='application/json'
+        )
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_password_reset_request_same_message_for_existing_and_nonexisting(self):
+        """The response message is identical whether or not the email exists (no enumeration)."""
+        real_response = self.client.post(
+            self.reset_request_url,
+            data=json.dumps({'email': 'testuser@example.com'}),
+            content_type='application/json'
+        )
+        fake_response = self.client.post(
+            self.reset_request_url,
+            data=json.dumps({'email': 'ghost@example.com'}),
+            content_type='application/json'
+        )
+
+        real_msg = json.loads(real_response.content)['message']
+        fake_msg = json.loads(fake_response.content)['message']
+        self.assertEqual(real_msg, fake_msg)
+
+    def test_password_reset_request_sends_email(self):
+        """A reset request for a real account dispatches exactly one email."""
+        from django.test import override_settings
+        with override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend'):
+            self.client.post(
+                self.reset_request_url,
+                data=json.dumps({'email': 'testuser@example.com'}),
+                content_type='application/json'
+            )
+        self.assertEqual(len(mail.outbox), 1)
+        self.assertEqual(mail.outbox[0].to, ['testuser@example.com'])
+
+    def test_password_reset_request_no_email_sent_for_nonexistent_user(self):
+        """A reset request for an unknown email sends no email."""
+        from django.test import override_settings
+        with override_settings(EMAIL_BACKEND='django.core.mail.backends.locmem.EmailBackend'):
+            self.client.post(
+                self.reset_request_url,
+                data=json.dumps({'email': 'ghost@example.com'}),
+                content_type='application/json'
+            )
+        self.assertEqual(len(mail.outbox), 0)
+
+
+# ---------------------------------------------------------------------------
+# Auth Me Tests  (GET /api/auth/me)
+# ---------------------------------------------------------------------------
+
+class AuthMeTests(TestCase):
+    """Tests for GET /api/auth/me — returns authenticated user's profile."""
+
+    def setUp(self):
+        self.client = Client()
+        self.me_url = '/api/auth/me'
+        self.token_url = '/api/token/pair'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _get_access_token(self, username='testuser', password='ValidPass123'):
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': username, 'password': password}),
+            content_type='application/json'
+        )
+        return json.loads(response.content)['access']
+
+    def test_authenticated_returns_200(self):
+        """A valid JWT token grants access to /api/auth/me."""
+        token = self._get_access_token()
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION=f'Bearer {token}')
+        self.assertEqual(response.status_code, 200)
+
+    def test_unauthenticated_returns_401(self):
+        """No token → 401 (JWTAuth rejects, not IsAuthenticated permission)."""
+        response = self.client.get(self.me_url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_invalid_token_returns_401(self):
+        """A malformed Bearer token is rejected with 401."""
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION='Bearer garbage.token')
+        self.assertEqual(response.status_code, 401)
+
+    def test_response_shape(self):
+        """Response includes id, username, email, email_verified, and profile."""
+        token = self._get_access_token()
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION=f'Bearer {token}')
+        body = json.loads(response.content)
+        self.assertIn('id', body)
+        self.assertIn('username', body)
+        self.assertIn('email', body)
+        self.assertIn('profile', body)
+        self.assertEqual(body['username'], 'testuser')
+        self.assertEqual(body['email'], 'testuser@example.com')
+
+    def test_response_includes_role_in_profile(self):
+        """Profile object in response contains the user's role."""
+        token = self._get_access_token()
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION=f'Bearer {token}')
+        body = json.loads(response.content)
+        self.assertIn('role', body['profile'])
+        self.assertEqual(body['profile']['role'], 'reader')  # default role
+
+    def test_editor_role_reflected_in_response(self):
+        """An editor's profile shows the editor role."""
+        self.user.profile.role = 'editor'
+        self.user.profile.save()
+        token = self._get_access_token()
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION=f'Bearer {token}')
+        self.assertEqual(json.loads(response.content)['profile']['role'], 'editor')
+
+    def test_admin_role_reflected_in_response(self):
+        """An admin's profile shows the admin role."""
+        self.user.profile.role = 'admin'
+        self.user.profile.save()
+        token = self._get_access_token()
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION=f'Bearer {token}')
+        self.assertEqual(json.loads(response.content)['profile']['role'], 'admin')
+
+    def test_returns_data_for_requesting_user_only(self):
+        """Each user sees their own data, not another user's."""
+        other = User.objects.create_user(
+            username='other', email='other@example.com', password='ValidPass123'
+        )
+        other.profile.email_verified = True
+        other.profile.save()
+
+        token = self._get_access_token(username='other')
+        response = self.client.get(self.me_url, HTTP_AUTHORIZATION=f'Bearer {token}')
+        body = json.loads(response.content)
+        self.assertEqual(body['username'], 'other')
+        self.assertEqual(body['email'], 'other@example.com')
 
 
 class TokenModelTests(TestCase):
@@ -572,6 +1004,51 @@ class JWTTokenTests(TestCase):
             HTTP_AUTHORIZATION='Bearer not.a.real.token'
         )
         self.assertEqual(response.status_code, 403)
+
+    def test_login_response_includes_username(self):
+        """Successful login response includes the username field."""
+        data = {'username': 'testuser', 'password': 'ValidPass123'}
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps(data),
+            content_type='application/json'
+        )
+        body = json.loads(response.content)
+        self.assertIn('username', body)
+        self.assertEqual(body['username'], 'testuser')
+
+    def test_login_skip_email_verification_allows_unverified(self):
+        """When SKIP_EMAIL_VERIFICATION=True, unverified users can still log in."""
+        from django.test import override_settings
+        self.user.profile.email_verified = False
+        self.user.profile.save()
+        data = {'username': 'testuser', 'password': 'ValidPass123'}
+        with override_settings(SKIP_EMAIL_VERIFICATION=True):
+            response = self.client.post(
+                self.token_url,
+                data=json.dumps(data),
+                content_type='application/json'
+            )
+        self.assertEqual(response.status_code, 200)
+        self.assertIn('access', json.loads(response.content))
+
+    def test_login_missing_password_returns_error(self):
+        """Omitting the password field is rejected at the serializer level."""
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser'}),
+            content_type='application/json'
+        )
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_login_empty_body_returns_error(self):
+        """An empty JSON body is rejected."""
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({}),
+            content_type='application/json'
+        )
+        self.assertNotEqual(response.status_code, 200)
 
 
 class JWTRefreshTests(TestCase):
