@@ -9,8 +9,12 @@ from ninja_jwt.authentication import JWTAuth
 from .permissions import IsEditorOrAdmin
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.conf import settings
 from typing import List, Optional
 from .models import BlogPost, Category
+from ninja import File
+from ninja.files import UploadedFile
+import uuid, os
 from .serializers import (
     BlogPostCreateIn,
     BlogPostUpdateIn,
@@ -227,3 +231,33 @@ class BlogController:
 
         posts = get_user_posts(user, include_drafts=True)
         return posts
+
+    @http_post(
+        "/upload-image/",
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated, IsEditorOrAdmin],
+        description="Upload an image for use in blog posts"
+    )
+    def upload_image(self, request, file: UploadedFile = File(...)):
+        """
+        Upload an image file and return its URL.
+        - Requires editor or admin role
+        - Accepts JPEG, PNG, GIF, WebP
+        - Max size: 10 MB
+        """
+        allowed = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
+        if file.content_type not in allowed:
+            raise HttpError(400, "Only JPEG, PNG, GIF, and WebP images are allowed.")
+        if file.size > 10 * 1024 * 1024:
+            raise HttpError(400, "Image must be under 10 MB.")
+
+        ext = os.path.splitext(file.name)[1].lower()
+        filename = f"{uuid.uuid4().hex}{ext}"
+        save_path = settings.MEDIA_ROOT / 'blog_images' / filename
+        save_path.parent.mkdir(parents=True, exist_ok=True)
+
+        with open(save_path, 'wb') as f:
+            for chunk in file.chunks():
+                f.write(chunk)
+
+        return {"url": f"{settings.MEDIA_URL}blog_images/{filename}"}
