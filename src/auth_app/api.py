@@ -457,3 +457,32 @@ def change_password(request, data: ChangePasswordSchema):
     user.set_password(data.new_password)
     user.save()
     return {'status': 'success', 'message': 'Password changed successfully'}
+
+
+@router.get("/profile/{username}")
+def get_public_profile(request, username: str):
+    """
+    Return a user's public profile.
+    Returns 404 if the user does not exist or has set their profile to private.
+    """
+    from ninja.errors import HttpError
+    try:
+        user = User.objects.select_related('profile').get(username=username)
+    except User.DoesNotExist:
+        raise HttpError(404, "Profile not found")
+
+    profile = getattr(user, 'profile', None)
+    if not profile or not profile.profile_public:
+        raise HttpError(404, "Profile not found")
+
+    avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+    return {
+        'username': user.username,
+        'display_name': profile.display_name,
+        'bio': profile.bio,
+        'avatar_url': avatar_url,
+        'twitter_url': profile.twitter_url,
+        'github_url': profile.github_url,
+        'website_url': profile.website_url,
+        'role': profile.role,
+    }
