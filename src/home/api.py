@@ -8,7 +8,7 @@ from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.tokens import RefreshToken
 from ninja_jwt.settings import api_settings as jwt_settings
 from auth_app.api import router as auth_router
-from blog.api import BlogController
+from blog.api import BlogController, CommentController
 from auth_app.serializers import LoginSerializer
 from django.http import JsonResponse
 from django.contrib.auth import authenticate
@@ -140,6 +140,7 @@ def blacklist_token_view(request, data: RefreshTokenIn):
 api.add_router("/token/", token_router)
 api.add_router("/auth/", auth_router)
 api.register_controllers(BlogController)
+api.register_controllers(CommentController)
 
 
 class UserSchema(Schema):

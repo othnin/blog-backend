@@ -143,6 +143,62 @@ class BlogPostOut(BaseModel):
         return v
 
 
+class CommentAuthorOut(BaseModel):
+    """Basic author info for comment output."""
+    id: int
+    username: str
+
+    class Config:
+        from_attributes = True
+
+
+class CommentIn(BaseModel):
+    """Input serializer for creating a comment."""
+    content_json: str = Field(..., description="Lexical editor JSON format")
+    parent_id: Optional[int] = None
+
+    @field_validator('content_json')
+    @classmethod
+    def validate_json(cls, v):
+        try:
+            json.loads(v)
+        except json.JSONDecodeError:
+            raise ValueError('content_json must be valid JSON')
+        return v
+
+
+class CommentUpdateIn(BaseModel):
+    """Input serializer for editing a comment."""
+    content_json: str = Field(..., description="Lexical editor JSON format")
+
+    @field_validator('content_json')
+    @classmethod
+    def validate_json(cls, v):
+        try:
+            json.loads(v)
+        except json.JSONDecodeError:
+            raise ValueError('content_json must be valid JSON')
+        return v
+
+
+class CommentOut(BaseModel):
+    """Output serializer for a comment (recursive for nested replies)."""
+    id: int
+    author: Optional[CommentAuthorOut] = None
+    content_json: Optional[str] = None
+    is_deleted: bool
+    created_at: datetime
+    updated_at: datetime
+    replies: List['CommentOut'] = Field(default_factory=list)
+
+    class Config:
+        from_attributes = True
+
+
+# Resolve the forward reference for recursive type
+CommentOut.model_rebuild()
+
+
 class BlogPostListOut(BaseModel):
     """Output serializer for blog post lists (summary)."""
     id: int

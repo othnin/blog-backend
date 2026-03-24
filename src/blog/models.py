@@ -149,3 +149,46 @@ class BlogPost(models.Model):
         """Increment the view count by 1."""
         self.view_count += 1
         self.save(update_fields=['view_count', 'updated_at'])
+
+
+class Comment(models.Model):
+    """
+    Threaded comment on a blog post.
+    Uses a self-referential FK for unlimited nesting depth.
+    Soft-deleted to preserve reply thread structure.
+    """
+    post = models.ForeignKey(
+        BlogPost,
+        on_delete=models.CASCADE,
+        related_name='comments',
+    )
+    author = models.ForeignKey(
+        User,
+        on_delete=models.CASCADE,
+        related_name='comments',
+    )
+    parent = models.ForeignKey(
+        'self',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='replies',
+    )
+    content_json = models.TextField(
+        help_text='Lexical editor JSON format for rich content'
+    )
+    is_deleted = models.BooleanField(
+        default=False,
+        help_text='Soft-delete flag — preserves row so child replies remain intact'
+    )
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['created_at']
+        indexes = [
+            models.Index(fields=['post', 'parent', 'created_at']),
+        ]
+
+    def __str__(self):
+        return f'Comment {self.id} by {self.author_id} on post {self.post_id}'

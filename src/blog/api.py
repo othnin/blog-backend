@@ -11,7 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.conf import settings
 from typing import List, Optional
-from .models import BlogPost, Category
+from .models import BlogPost, Category, Comment
 from ninja import File
 from ninja.files import UploadedFile
 import uuid, os
@@ -22,6 +22,9 @@ from .serializers import (
     BlogPostListOut,
     CategoryOut,
     CategoryCreateIn,
+    CommentIn,
+    CommentUpdateIn,
+    CommentOut,
 )
 from .utils import (
     create_unique_slug,
@@ -261,3 +264,128 @@ class BlogController:
                 f.write(chunk)
 
         return {"url": f"{settings.MEDIA_URL}blog_images/{filename}"}
+
+
+# ─── Comment helpers ──────────────────────────────────────────────────────────
+
+def _build_comment_tree(post):
+    """
+    Fetch all comments for a post in a single query and build a nested tree.
+    Returns a list of dicts matching the CommentOut schema.
+    """
+    all_comments = (
+        Comment.objects
+        .filter(post=post)
+        .select_related('author')
+        .order_by('created_at')
+    )
+    comment_map = {}
+    roots = []
+    for c in all_comments:
+        node = {
+            'id': c.id,
+            'author': {'id': c.author_id, 'username': c.author.username} if not c.is_deleted else None,
+            'content_json': c.content_json if not c.is_deleted else None,
+            'is_deleted': c.is_deleted,
+            'created_at': c.created_at,
+            'updated_at': c.updated_at,
+            'replies': [],
+        }
+        comment_map[c.id] = node
+        if c.parent_id is None:
+            roots.append(node)
+        else:
+            parent_node = comment_map.get(c.parent_id)
+            if parent_node:
+                parent_node['replies'].append(node)
+    return roots
+
+
+def _comment_to_dict(c):
+    """Serialize a single Comment instance (no replies) to a dict."""
+    return {
+        'id': c.id,
+        'author': {'id': c.author_id, 'username': c.author.username} if not c.is_deleted else None,
+        'content_json': c.content_json if not c.is_deleted else None,
+        'is_deleted': c.is_deleted,
+        'created_at': c.created_at,
+        'updated_at': c.updated_at,
+        'replies': [],
+    }
+
+
+# ─── Comment Controller ───────────────────────────────────────────────────────
+
+@api_controller("/blog", tags=["Comments"])
+class CommentController:
+    """API controller for blog post comments."""
+
+    @http_get(
+        "/posts/{post_id}/comments/",
+        response=List[CommentOut],
+        description="Get all comments for a blog post as a nested tree"
+    )
+    def list_comments(self, post_id: int) -> List[CommentOut]:
+        """Public endpoint — returns all comments as a nested tree."""
+        post = get_object_or_404(BlogPost, id=post_id, status='published')
+        return _build_comment_tree(post)
+
+    @http_post(
+        "/posts/{post_id}/comments/",
+        response=CommentOut,
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated],
+        description="Post a comment on a blog post"
+    )
+    def create_comment(self, post_id: int, payload: CommentIn) -> CommentOut:
+        """Create a top-level comment or a reply. Any authenticated user can comment."""
+        post = get_object_or_404(BlogPost, id=post_id, status='published')
+        parent = None
+        if payload.parent_id is not None:
+            parent = get_object_or_404(Comment, id=payload.parent_id, post=post)
+        comment = Comment.objects.create(
+            post=post,
+            author=self.context.request.user,
+            parent=parent,
+            content_json=payload.content_json,
+        )
+        comment.refresh_from_db()
+        return _comment_to_dict(comment)
+
+    @http_put(
+        "/comments/{comment_id}/",
+        response=CommentOut,
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated],
+        description="Edit a comment (own comment only)"
+    )
+    def update_comment(self, comment_id: int, payload: CommentUpdateIn) -> CommentOut:
+        """Edit own comment content. Only the comment's author may edit it."""
+        comment = get_object_or_404(Comment, id=comment_id, is_deleted=False)
+        user = self.context.request.user
+        if comment.author_id != user.id:
+            raise HttpError(403, "You can only edit your own comments")
+        comment.content_json = payload.content_json
+        comment.save(update_fields=['content_json', 'updated_at'])
+        return _comment_to_dict(comment)
+
+    @http_delete(
+        "/comments/{comment_id}/",
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated],
+        description="Delete a comment (own comment, or any comment for admins)"
+    )
+    def delete_comment(self, comment_id: int) -> dict:
+        """
+        Soft-delete a comment. The row is kept so child replies remain intact.
+        Author content is cleared; the deleted tombstone is shown in the UI.
+        """
+        comment = get_object_or_404(Comment, id=comment_id, is_deleted=False)
+        user = self.context.request.user
+        is_admin = hasattr(user, 'profile') and user.profile.role == 'admin'
+        if not is_admin and comment.author_id != user.id:
+            raise HttpError(403, "You can only delete your own comments")
+        comment.is_deleted = True
+        comment.content_json = ''
+        comment.save(update_fields=['is_deleted', 'content_json', 'updated_at'])
+        return {"message": "Comment deleted"}
