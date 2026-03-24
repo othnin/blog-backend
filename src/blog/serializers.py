@@ -215,6 +215,7 @@ class BlogPostListOut(BaseModel):
     created_at: datetime
     author: UserBasicOut
     categories: List[CategoryOut] = Field(default_factory=list)
+    content_text: str = ''
 
     class Config:
         from_attributes = True

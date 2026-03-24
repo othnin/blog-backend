@@ -1,6 +1,7 @@
 """
 Utility functions for blog operations.
 """
+from django.db.models import Q
 from django.utils import timezone
 from django.utils.text import slugify
 from .models import BlogPost, Category
@@ -78,11 +79,21 @@ def can_delete_post(user, blog_post) -> bool:
     return can_edit_post(user, blog_post)
 
 
-def get_published_posts(limit: Optional[int] = None):
-    """Get all published blog posts, optionally limited."""
+def get_published_posts(limit: Optional[int] = None, category: Optional[str] = None, search: Optional[str] = None):
+    """Get all published blog posts, optionally filtered by category slug, search query, and limited."""
     queryset = BlogPost.objects.filter(
         status='published'
     ).select_related('author', 'author__profile').prefetch_related('categories')
+
+    if category:
+        queryset = queryset.filter(categories__slug=category)
+
+    if search:
+        queryset = queryset.filter(
+            Q(title__icontains=search) |
+            Q(author__username__icontains=search) |
+            Q(content_text__icontains=search)
+        )
 
     if limit:
         queryset = queryset[:limit]

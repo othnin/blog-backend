@@ -79,14 +79,16 @@ class BlogController:
         response=List[BlogPostListOut],
         description="Get published blog posts with optional filtering"
     )
-    def list_published_posts(self, limit: Optional[int] = None) -> List[BlogPostListOut]:
+    def list_published_posts(self, limit: Optional[int] = None, category: Optional[str] = None, search: Optional[str] = None) -> List[BlogPostListOut]:
         """
         Retrieve published blog posts.
         - Public endpoint (no auth required)
         - Returns published posts only
         - Optional limit parameter
+        - Optional category slug to filter by
+        - Optional search query to filter by title or author
         """
-        queryset = get_published_posts(limit=limit)
+        queryset = get_published_posts(limit=limit, category=category, search=search)
         return queryset
 
     @http_get(

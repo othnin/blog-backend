@@ -8,6 +8,33 @@ from django.utils.text import slugify
 import json
 
 
+def _lexical_to_text(content_json: str) -> str:
+    """Extract plain text from Lexical JSON content by walking the node tree."""
+    try:
+        data = json.loads(content_json)
+    except (json.JSONDecodeError, TypeError):
+        return ''
+
+    parts = []
+
+    def walk(node):
+        if isinstance(node, dict):
+            if node.get('type') == 'text':
+                text = node.get('text', '')
+                if text:
+                    parts.append(text)
+            else:
+                for value in node.values():
+                    if isinstance(value, (dict, list)):
+                        walk(value)
+        elif isinstance(node, list):
+            for item in node:
+                walk(item)
+
+    walk(data)
+    return ' '.join(parts)
+
+
 class Category(models.Model):
     """
     Category model for organizing blog posts.
@@ -68,6 +95,11 @@ class BlogPost(models.Model):
     content_json = models.TextField(
         help_text='Lexical editor JSON format for rich content'
     )
+    content_text = models.TextField(
+        blank=True,
+        default='',
+        help_text='Plain-text extract of content_json, kept in sync on save, used for full-text search'
+    )
 
     # Metadata
     featured_image_url = models.URLField(
@@ -127,12 +159,15 @@ class BlogPost(models.Model):
     def save(self, *args, **kwargs):
         if not self.slug:
             self.slug = slugify(self.title)
-        
+
         # Auto-set published_at when status changes to published
         if self.status == 'published' and not self.published_at:
             from django.utils import timezone
             self.published_at = timezone.now()
-        
+
+        # Keep plain-text copy of content in sync for full-text search
+        self.content_text = _lexical_to_text(self.content_json)
+
         super().save(*args, **kwargs)
 
     def get_content_dict(self):
