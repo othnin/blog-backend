@@ -41,10 +41,13 @@ class UserWithProfileOut(UserBasicOut):
 
     @staticmethod
     def resolve_avatar(obj):
-        """Resolve avatar from user.profile.avatar"""
+        """Resolve avatar URL from user.profile.avatar ImageField."""
         try:
-            return obj.profile.avatar
-        except:
+            if obj.profile.avatar:
+                from django.conf import settings
+                return f"{settings.MEDIA_URL}{obj.profile.avatar.name}"
+            return None
+        except Exception:
             return None
 
     @staticmethod
@@ -147,6 +150,7 @@ class CommentAuthorOut(BaseModel):
     """Basic author info for comment output."""
     id: int
     username: str
+    avatar_url: Optional[str] = None
 
     class Config:
         from_attributes = True

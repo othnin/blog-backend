@@ -68,8 +68,15 @@ class UserProfile(models.Model):
     
     user = models.OneToOneField(User, on_delete=models.CASCADE, related_name='profile')
     email_verified = models.BooleanField(default=False)
-    avatar = models.URLField(blank=True, null=True, help_text='URL to user avatar image')
+    avatar = models.ImageField(upload_to='avatars/', blank=True, null=True)
     role = models.CharField(max_length=20, choices=ROLE_CHOICES, default='reader', help_text='Blog role: reader (read-only), editor (can create/edit own), admin (full access)')
+    display_name = models.CharField(max_length=100, blank=True)
+    bio = models.TextField(max_length=500, blank=True)
+    email_notifications = models.BooleanField(default=True)
+    twitter_url = models.URLField(blank=True)
+    github_url = models.URLField(blank=True)
+    website_url = models.URLField(blank=True)
+    profile_public = models.BooleanField(default=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

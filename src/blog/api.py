@@ -268,6 +268,15 @@ class BlogController:
 
 # ─── Comment helpers ──────────────────────────────────────────────────────────
 
+def _author_dict(user):
+    """Build a comment author dict including avatar_url."""
+    try:
+        avatar_url = f"{settings.MEDIA_URL}{user.profile.avatar.name}" if user.profile.avatar else None
+    except Exception:
+        avatar_url = None
+    return {'id': user.id, 'username': user.username, 'avatar_url': avatar_url}
+
+
 def _build_comment_tree(post):
     """
     Fetch all comments for a post in a single query and build a nested tree.
@@ -276,7 +285,7 @@ def _build_comment_tree(post):
     all_comments = (
         Comment.objects
         .filter(post=post)
-        .select_related('author')
+        .select_related('author', 'author__profile')
         .order_by('created_at')
     )
     comment_map = {}
@@ -284,7 +293,7 @@ def _build_comment_tree(post):
     for c in all_comments:
         node = {
             'id': c.id,
-            'author': {'id': c.author_id, 'username': c.author.username} if not c.is_deleted else None,
+            'author': _author_dict(c.author) if not c.is_deleted else None,
             'content_json': c.content_json if not c.is_deleted else None,
             'is_deleted': c.is_deleted,
             'created_at': c.created_at,
@@ -305,7 +314,7 @@ def _comment_to_dict(c):
     """Serialize a single Comment instance (no replies) to a dict."""
     return {
         'id': c.id,
-        'author': {'id': c.author_id, 'username': c.author.username} if not c.is_deleted else None,
+        'author': _author_dict(c.author) if not c.is_deleted else None,
         'content_json': c.content_json if not c.is_deleted else None,
         'is_deleted': c.is_deleted,
         'created_at': c.created_at,

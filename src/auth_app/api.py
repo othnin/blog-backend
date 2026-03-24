@@ -4,11 +4,17 @@ Includes registration, email verification, and password reset.
 """
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from ninja import Router, Schema
+from ninja import Router, Schema, File
+from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
 from pydantic import ValidationError as PydanticValidationError
 from typing import Optional
 import helpers
+import io
+import os
+import uuid
+from PIL import Image
+from django.conf import settings
 from auth_app.serializers import (
     RegisterSerializer,
     EmailVerificationSerializer,
@@ -16,6 +22,9 @@ from auth_app.serializers import (
     PasswordResetConfirmSerializer,
     UserResponseSchema,
     LoginSerializer,
+    UserSettingsSchema,
+    UserSettingsUpdateSchema,
+    ChangePasswordSchema,
 )
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
 from auth_app.utils import (
@@ -324,20 +333,23 @@ def password_reset_confirm(request, data: PasswordResetConfirmSerializer):
 def get_current_user(request):
     """
     Get the current authenticated user's information.
-    
+
     Requires JWT authentication.
-    
+
     Response:
     - Returns current user data on success
     """
     user = request.user
-    
+
     try:
         profile = user.profile
         role = profile.role
+        avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
     except UserProfile.DoesNotExist:
         role = 'reader'
-    
+        avatar_url = None
+        profile = None
+
     return {
         'id': user.id,
         'username': user.username,
@@ -346,6 +358,102 @@ def get_current_user(request):
         'last_name': user.last_name,
         'profile': {
             'role': role,
-            'avatar': getattr(profile, 'avatar', None) if hasattr(user, 'profile') else None,
+            'avatar': avatar_url,
+            'display_name': profile.display_name if profile else '',
+            'bio': profile.bio if profile else '',
+            'email_notifications': profile.email_notifications if profile else True,
+            'twitter_url': profile.twitter_url if profile else '',
+            'github_url': profile.github_url if profile else '',
+            'website_url': profile.website_url if profile else '',
+            'profile_public': profile.profile_public if profile else True,
         }
     }
+
+
+@router.get("/settings", response=UserSettingsSchema, auth=JWTAuth())
+def get_settings(request):
+    """Get the current user's profile settings."""
+    user = request.user
+    profile = user.profile
+    avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+    return {
+        'display_name': profile.display_name,
+        'bio': profile.bio,
+        'email_notifications': profile.email_notifications,
+        'twitter_url': profile.twitter_url,
+        'github_url': profile.github_url,
+        'website_url': profile.website_url,
+        'profile_public': profile.profile_public,
+        'avatar_url': avatar_url,
+    }
+
+
+@router.patch("/settings", response=UserSettingsSchema, auth=JWTAuth())
+def update_settings(request, data: UserSettingsUpdateSchema):
+    """Update the current user's profile settings."""
+    user = request.user
+    profile = user.profile
+    for field, value in data.model_dump(exclude_unset=True).items():
+        setattr(profile, field, value)
+    profile.save()
+    avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+    return {
+        'display_name': profile.display_name,
+        'bio': profile.bio,
+        'email_notifications': profile.email_notifications,
+        'twitter_url': profile.twitter_url,
+        'github_url': profile.github_url,
+        'website_url': profile.website_url,
+        'profile_public': profile.profile_public,
+        'avatar_url': avatar_url,
+    }
+
+
+@router.post("/avatar", auth=JWTAuth())
+def upload_avatar(request, file: UploadedFile = File(...)):
+    """
+    Upload and resize a user avatar image.
+    Accepts JPEG, PNG, WebP. Resizes to max 400x400 before saving.
+    """
+    allowed = {'image/jpeg', 'image/png', 'image/webp'}
+    if file.content_type not in allowed:
+        from ninja.errors import HttpError
+        raise HttpError(400, "Only JPEG, PNG, and WebP images are allowed.")
+    if file.size > 10 * 1024 * 1024:
+        from ninja.errors import HttpError
+        raise HttpError(400, "Image must be under 10 MB.")
+
+    img = Image.open(file)
+    img = img.convert('RGB')
+    img.thumbnail((400, 400), Image.LANCZOS)
+
+    ext = 'jpg'
+    filename = f"{uuid.uuid4().hex}.{ext}"
+    save_dir = settings.MEDIA_ROOT / 'avatars'
+    save_dir.mkdir(parents=True, exist_ok=True)
+    save_path = save_dir / filename
+
+    img.save(save_path, format='JPEG', quality=85)
+
+    profile = request.user.profile
+    if profile.avatar:
+        old_path = settings.MEDIA_ROOT / profile.avatar.name
+        if old_path.exists():
+            old_path.unlink()
+    profile.avatar = f'avatars/{filename}'
+    profile.save(update_fields=['avatar'])
+
+    avatar_url = request.build_absolute_uri(profile.avatar.url)
+    return {'avatar_url': avatar_url}
+
+
+@router.post("/change-password", auth=JWTAuth())
+def change_password(request, data: ChangePasswordSchema):
+    """Change the authenticated user's password after verifying the current one."""
+    from django.contrib.auth import authenticate
+    user = request.user
+    if not authenticate(username=user.username, password=data.current_password):
+        return {'status': 'error', 'message': 'Current password is incorrect'}
+    user.set_password(data.new_password)
+    user.save()
+    return {'status': 'success', 'message': 'Password changed successfully'}

@@ -7,3 +7,5 @@ psycopg[binary] # psycopg
 pydantic[email]
 python-decouple
 rav
+Pillow
+django-ninja-extra
