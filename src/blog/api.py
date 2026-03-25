@@ -137,7 +137,6 @@ class BlogController:
             title=payload.title,
             slug=slug,
             content_json=payload.content_json,
-            featured_image_url=payload.featured_image_url,
             status=payload.status,
             author=user,
         )
@@ -181,9 +180,6 @@ class BlogController:
 
         if payload.content_json:
             blog_post.content_json = payload.content_json
-
-        if payload.featured_image_url is not None:
-            blog_post.featured_image_url = payload.featured_image_url
 
         if payload.status:
             blog_post.status = payload.status

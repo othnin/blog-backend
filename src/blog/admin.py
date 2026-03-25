@@ -20,7 +20,7 @@ class BlogPostAdmin(admin.ModelAdmin):
     
     fieldsets = (
         ('Basic Information', {
-            'fields': ('title', 'slug', 'author', 'featured_image_url')
+            'fields': ('title', 'slug', 'author')
         }),
         ('Content', {
             'fields': ('content_json',)

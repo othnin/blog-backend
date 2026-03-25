@@ -68,7 +68,6 @@ class BlogPostCreateIn(BaseModel):
     """Input serializer for creating a blog post."""
     title: str = Field(..., min_length=1, max_length=500)
     content_json: str = Field(..., description="Lexical editor JSON format")
-    featured_image_url: Optional[str] = None
     category_ids: Optional[List[int]] = Field(default_factory=list)
     status: str = Field(default='draft')
 
@@ -94,7 +93,6 @@ class BlogPostUpdateIn(BaseModel):
     """Input serializer for updating a blog post."""
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     content_json: Optional[str] = None
-    featured_image_url: Optional[str] = None
     category_ids: Optional[List[int]] = None
     status: Optional[str] = None
 
@@ -151,7 +149,6 @@ class BlogPostOut(BaseModel):
     title: str
     slug: str
     content_json: str
-    featured_image_url: Optional[str] = None
     status: str
     view_count: int
     published_at: Optional[datetime] = None
@@ -233,7 +230,6 @@ class BlogPostListOut(BaseModel):
     id: int
     title: str
     slug: str
-    featured_image_url: Optional[str] = None
     status: str
     view_count: int
     published_at: Optional[datetime] = None

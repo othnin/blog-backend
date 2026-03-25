@@ -71,7 +71,6 @@ class BlogPost(models.Model):
     - Author ownership and role-based access
     - Status management (draft, published, scheduled, archived)
     - View count tracking
-    - Featured image URL
     - Lexical JSON content storage
     """
     STATUS_CHOICES = [
@@ -102,11 +101,6 @@ class BlogPost(models.Model):
     )
 
     # Metadata
-    featured_image_url = models.URLField(
-        blank=True,
-        null=True,
-        help_text='URL to featured/hero image for the blog post'
-    )
     categories = models.ManyToManyField(
         Category,
         related_name='blog_posts',
