@@ -101,11 +101,13 @@ class BlogPost(models.Model):
     )
 
     # Metadata
-    categories = models.ManyToManyField(
+    category = models.ForeignKey(
         Category,
-        related_name='blog_posts',
+        null=True,
         blank=True,
-        help_text='Categories for organizing blog posts'
+        on_delete=models.SET_NULL,
+        related_name='blog_posts',
+        help_text='Category for this blog post'
     )
 
     # Status & Publishing

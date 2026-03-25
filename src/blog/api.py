@@ -104,7 +104,7 @@ class BlogController:
         - Increments view count when accessed
         """
         blog_post = get_object_or_404(
-            BlogPost.objects.select_related('author', 'author__profile').prefetch_related('categories'),
+            BlogPost.objects.select_related('author', 'author__profile', 'category'),
             slug=slug, status='published'
         )
         
@@ -145,18 +145,18 @@ class BlogController:
         slug = create_unique_slug(payload.title)
 
         # Create blog post
+        category = None
+        if payload.category_id:
+            category = get_object_or_404(Category, id=payload.category_id)
+
         blog_post = BlogPost.objects.create(
             title=payload.title,
             slug=slug,
             content_json=payload.content_json,
             status=payload.status,
             author=user,
+            category=category,
         )
-
-        # Add categories
-        if payload.category_ids:
-            categories = Category.objects.filter(id__in=payload.category_ids)
-            blog_post.categories.set(categories)
 
         return blog_post
 
@@ -176,7 +176,7 @@ class BlogController:
         """
         request = self.context.request
         user = request.user
-        qs = BlogPost.objects.select_related('author', 'author__profile').prefetch_related('categories')
+        qs = BlogPost.objects.select_related('author', 'author__profile', 'category')
         try:
             blog_post = qs.get(id=int(slug))
         except (ValueError, BlogPost.DoesNotExist):
@@ -196,10 +196,7 @@ class BlogController:
         if payload.status:
             blog_post.status = payload.status
 
-        # Update categories if provided
-        if payload.category_ids is not None:
-            categories = Category.objects.filter(id__in=payload.category_ids)
-            blog_post.categories.set(categories)
+        blog_post.category = get_object_or_404(Category, id=payload.category_id) if payload.category_id else None
 
         blog_post.save()
         return blog_post

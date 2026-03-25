@@ -68,7 +68,7 @@ class BlogPostCreateIn(BaseModel):
     """Input serializer for creating a blog post."""
     title: str = Field(..., min_length=1, max_length=500)
     content_json: str = Field(..., description="Lexical editor JSON format")
-    category_ids: Optional[List[int]] = Field(default_factory=list)
+    category_id: Optional[int] = None
     status: str = Field(default='draft')
 
     @field_validator('status')
@@ -93,7 +93,7 @@ class BlogPostUpdateIn(BaseModel):
     """Input serializer for updating a blog post."""
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     content_json: Optional[str] = None
-    category_ids: Optional[List[int]] = None
+    category_id: Optional[int] = None
     status: Optional[str] = None
 
     @field_validator('status')
@@ -156,17 +156,10 @@ class BlogPostOut(BaseModel):
     created_at: datetime
     updated_at: datetime
     author: BlogPostAuthorOut
-    categories: List[CategoryOut] = Field(default_factory=list)
+    category: Optional[CategoryOut] = None
 
     class Config:
         from_attributes = True
-
-    @field_validator('categories', mode='before')
-    @classmethod
-    def coerce_categories(cls, v):
-        if hasattr(v, 'all'):
-            return list(v.all())
-        return v
 
 
 class CommentAuthorOut(BaseModel):
@@ -237,18 +230,11 @@ class BlogPostListOut(BaseModel):
     published_at: Optional[datetime] = None
     created_at: datetime
     author: UserBasicOut
-    categories: List[CategoryOut] = Field(default_factory=list)
+    category: Optional[CategoryOut] = None
     content_text: str = ''
 
     class Config:
         from_attributes = True
-
-    @field_validator('categories', mode='before')
-    @classmethod
-    def coerce_categories(cls, v):
-        if hasattr(v, 'all'):
-            return list(v.all())
-        return v
 
 
 class LikeOut(BaseModel):

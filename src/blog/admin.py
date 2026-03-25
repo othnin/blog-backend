@@ -14,10 +14,9 @@ class BlogPostAdmin(admin.ModelAdmin):
     list_display = ('title', 'author', 'status', 'view_count', 'published_at', 'created_at')
     list_filter = ('status', 'created_at', 'published_at')
     search_fields = ('title', 'slug', 'author__username')
-    filter_horizontal = ('categories',)
     readonly_fields = ('view_count', 'created_at', 'updated_at')
     prepopulated_fields = {'slug': ('title',)}
-    
+
     fieldsets = (
         ('Basic Information', {
             'fields': ('title', 'slug', 'author')
@@ -26,7 +25,7 @@ class BlogPostAdmin(admin.ModelAdmin):
             'fields': ('content_json',)
         }),
         ('Metadata', {
-            'fields': ('categories', 'status', 'view_count')
+            'fields': ('category', 'status', 'view_count')
         }),
         ('Publishing', {
             'fields': ('published_at', 'created_at', 'updated_at'),

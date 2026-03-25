@@ -83,10 +83,10 @@ def get_published_posts(limit: Optional[int] = None, category: Optional[str] = N
     """Get all published blog posts, optionally filtered by category slug, search query, and limited."""
     queryset = BlogPost.objects.filter(
         status='published'
-    ).select_related('author', 'author__profile').prefetch_related('categories')
+    ).select_related('author', 'author__profile', 'category')
 
     if category:
-        queryset = queryset.filter(categories__slug=category)
+        queryset = queryset.filter(category__slug=category)
 
     if search:
         queryset = queryset.filter(
@@ -104,8 +104,8 @@ def get_published_posts(limit: Optional[int] = None, category: Optional[str] = N
 def get_user_posts(user, include_drafts=True):
     """Get blog posts for a specific user."""
     queryset = BlogPost.objects.filter(author=user).select_related(
-        'author', 'author__profile'
-    ).prefetch_related('categories')
+        'author', 'author__profile', 'category'
+    )
 
     if not include_drafts:
         queryset = queryset.exclude(status='draft')
