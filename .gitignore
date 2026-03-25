@@ -162,4 +162,8 @@ cython_debug/
 #.idea/
 
 
-src/media/blog_images/
+src/media/blog_images/*
+!src/media/blog_images/.gitkeep
+
+src/media/avatars/*
+!src/media/avatars/.gitkeep
