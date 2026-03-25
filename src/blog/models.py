@@ -128,6 +128,10 @@ class BlogPost(models.Model):
         default=0,
         help_text='Number of times this blog post has been viewed'
     )
+    like_count = models.PositiveIntegerField(
+        default=0,
+        help_text='Number of likes this blog post has received'
+    )
 
     # Timestamps
     created_at = models.DateTimeField(auto_now_add=True, db_index=True)
@@ -178,6 +182,11 @@ class BlogPost(models.Model):
         """Increment the view count by 1."""
         self.view_count += 1
         self.save(update_fields=['view_count', 'updated_at'])
+
+    def increment_like_count(self):
+        """Increment the like count by 1."""
+        self.like_count += 1
+        self.save(update_fields=['like_count', 'updated_at'])
 
 
 class Comment(models.Model):

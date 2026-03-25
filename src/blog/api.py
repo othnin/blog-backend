@@ -25,6 +25,7 @@ from .serializers import (
     CommentIn,
     CommentUpdateIn,
     CommentOut,
+    LikeOut,
 )
 from .utils import (
     create_unique_slug,
@@ -109,8 +110,19 @@ class BlogController:
         
         # Increment view count asynchronously
         blog_post.increment_view_count()
-        
+
         return blog_post
+
+    @http_post(
+        "/posts/{slug}/like/",
+        response=LikeOut,
+        description="Like a blog post"
+    )
+    def like_post(self, slug: str) -> LikeOut:
+        """Increment the like count for a published blog post."""
+        blog_post = get_object_or_404(BlogPost, slug=slug, status='published')
+        blog_post.increment_like_count()
+        return LikeOut(like_count=blog_post.like_count)
 
     @http_post(
         "/posts/",

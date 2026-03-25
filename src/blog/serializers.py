@@ -151,6 +151,7 @@ class BlogPostOut(BaseModel):
     content_json: str
     status: str
     view_count: int
+    like_count: int
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
@@ -232,6 +233,7 @@ class BlogPostListOut(BaseModel):
     slug: str
     status: str
     view_count: int
+    like_count: int
     published_at: Optional[datetime] = None
     created_at: datetime
     author: UserBasicOut
@@ -247,3 +249,9 @@ class BlogPostListOut(BaseModel):
         if hasattr(v, 'all'):
             return list(v.all())
         return v
+
+
+class LikeOut(BaseModel):
+    """Response for a like action."""
+    like_count: int
+
