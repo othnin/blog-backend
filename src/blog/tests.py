@@ -1,16 +1,17 @@
 """
 Unit tests for blog endpoints, models, and utilities.
 
-Authentication note: the blog controller uses ninja_extra permissions=[IsAuthenticated]
-without an explicit auth=JWTAuth() scheme, so request.user is populated via Django's
-session middleware.  Tests authenticate with force_login().  Unauthenticated requests
-return 403 (ninja_extra IsAuthenticated permission denial), not 401.
+Authentication note: the blog controller uses auth=JWTAuth() on all protected
+endpoints.  Tests obtain a real JWT token via POST /api/token/pair and send it
+via HTTP_AUTHORIZATION on every request using the JWTClient helper.
+Unauthenticated requests return 401 (JWTAuth rejects before any permission check).
+Authenticated-but-unauthorised requests return 403 (IsEditorOrAdmin permission).
 """
 from django.test import TestCase, Client
 from django.contrib.auth.models import User
 import json
 
-from blog.models import BlogPost, Category
+from blog.models import BlogPost, Category, Comment
 from blog.utils import create_unique_slug, can_edit_post, can_delete_post
 
 
@@ -54,11 +55,29 @@ def make_post(title, author, status='draft', slug=None):
     )
 
 
-def logged_in_client(user):
-    """Return a Django test client authenticated as *user* via session."""
+class JWTClient(Client):
+    """Django test client that injects a Bearer JWT token on every request."""
+
+    def __init__(self, token, **kwargs):
+        super().__init__(**kwargs)
+        self._jwt_token = token
+
+    def _base_environ(self, **request):
+        environ = super()._base_environ(**request)
+        environ.setdefault('HTTP_AUTHORIZATION', f'Bearer {self._jwt_token}')
+        return environ
+
+
+def jwt_client(user, password='ValidPass123'):
+    """Return a JWTClient authenticated as *user*."""
     c = Client()
-    c.force_login(user)
-    return c
+    resp = c.post(
+        '/api/token/pair',
+        data=json.dumps({'username': user.username, 'password': password}),
+        content_type='application/json',
+    )
+    token = json.loads(resp.content)['access']
+    return JWTClient(token=token)
 
 
 # ---------------------------------------------------------------------------
@@ -66,10 +85,11 @@ def logged_in_client(user):
 # ---------------------------------------------------------------------------
 
 class CategoryTests(TestCase):
-    """Tests for GET /api/blog/categories/"""
+    """Tests for GET /api/blog/categories/ and POST /api/blog/categories/"""
 
     def setUp(self):
         self.client = Client()
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
         Category.objects.create(name='Technology', slug='technology')
         Category.objects.create(name='Science', slug='science')
 
@@ -97,6 +117,24 @@ class CategoryTests(TestCase):
     def test_category_slug_uniqueness_enforced(self):
         with self.assertRaises(Exception):
             Category.objects.create(name='Duplicate', slug='technology')
+
+    def test_editor_can_create_category(self):
+        client = jwt_client(self.editor)
+        response = client.post(
+            '/api/blog/categories/',
+            data=json.dumps({'name': 'New Category'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['name'], 'New Category')
+
+    def test_unauthenticated_cannot_create_category(self):
+        response = self.client.post(
+            '/api/blog/categories/',
+            data=json.dumps({'name': 'Sneaky'}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 401)
 
 
 # ---------------------------------------------------------------------------
@@ -140,6 +178,17 @@ class BlogPostListTests(TestCase):
         data = json.loads(response.content)
         self.assertEqual(len(data), 2)
 
+    def test_search_by_title(self):
+        response = self.client.get('/api/blog/posts/?search=Published')
+        data = json.loads(response.content)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['title'], 'Published Post')
+
+    def test_search_no_match_returns_empty(self):
+        response = self.client.get('/api/blog/posts/?search=xyznotfound')
+        data = json.loads(response.content)
+        self.assertEqual(len(data), 0)
+
 
 # ---------------------------------------------------------------------------
 # Blog Post Detail Tests
@@ -172,7 +221,6 @@ class BlogPostDetailTests(TestCase):
         self.assertEqual(response.status_code, 404)
 
     def test_draft_post_returns_404_publicly(self):
-        # Draft posts are not accessible by slug (status='published' filter)
         response = self.client.get('/api/blog/posts/draft-post/')
         self.assertEqual(response.status_code, 404)
 
@@ -182,6 +230,17 @@ class BlogPostDetailTests(TestCase):
         self.assertIn('content_json', data)
         self.assertIn('author', data)
         self.assertIn('view_count', data)
+
+    def test_author_avatar_url_field_present(self):
+        """BlogPostAuthorOut must always include avatar_url (null when unset)."""
+        response = self.client.get('/api/blog/posts/published-post/')
+        data = json.loads(response.content)
+        self.assertIn('avatar_url', data['author'])
+
+    def test_author_avatar_url_is_none_without_upload(self):
+        response = self.client.get('/api/blog/posts/published-post/')
+        data = json.loads(response.content)
+        self.assertIsNone(data['author']['avatar_url'])
 
 
 # ---------------------------------------------------------------------------
@@ -199,7 +258,7 @@ class BlogPostCreateTests(TestCase):
         self.valid_data = {'title': 'My New Post', 'content_json': LEXICAL_JSON}
 
     def _post(self, data, user=None):
-        client = logged_in_client(user) if user else Client()
+        client = jwt_client(user) if user else Client()
         return client.post(self.url, data=json.dumps(data), content_type='application/json')
 
     def test_editor_can_create_post(self):
@@ -218,9 +277,8 @@ class BlogPostCreateTests(TestCase):
         self.assertEqual(response.status_code, 403)
 
     def test_unauthenticated_cannot_create_post(self):
-        # IsAuthenticated permission returns 403 for anonymous users
         response = self._post(self.valid_data)
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
     def test_default_status_is_draft(self):
         response = self._post(self.valid_data, self.editor)
@@ -259,13 +317,19 @@ class BlogPostCreateTests(TestCase):
         response = self._post(self.valid_data, self.editor)
         self.assertEqual(response.status_code, 200)
         result = json.loads(response.content)
-        # Slug must differ from the first post's slug
         self.assertNotEqual(result['slug'], 'my-new-post')
 
     def test_empty_title_rejected(self):
         data = {'title': '', 'content_json': LEXICAL_JSON}
         response = self._post(data, self.editor)
         self.assertNotEqual(response.status_code, 200)
+
+    def test_response_includes_avatar_url(self):
+        """Created post response must include author.avatar_url."""
+        response = self._post(self.valid_data, self.editor)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertIn('avatar_url', data['author'])
 
 
 # ---------------------------------------------------------------------------
@@ -283,7 +347,7 @@ class BlogPostUpdateTests(TestCase):
 
     def _put(self, data, user=None, post_id=None):
         pid = post_id or self.post.id
-        client = logged_in_client(user) if user else Client()
+        client = jwt_client(user) if user else Client()
         return client.put(f'/api/blog/posts/{pid}/', data=json.dumps(data), content_type='application/json')
 
     def test_owner_can_update_own_post(self):
@@ -302,7 +366,7 @@ class BlogPostUpdateTests(TestCase):
 
     def test_unauthenticated_cannot_update(self):
         response = self._put({'title': 'Unauthorized'})
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
     def test_publishing_sets_published_at(self):
         response = self._put({'status': 'published'}, self.editor)
@@ -313,7 +377,6 @@ class BlogPostUpdateTests(TestCase):
 
     def test_update_nonexistent_post_returns_error(self):
         response = self._put({'title': 'Ghost'}, self.admin, post_id=99999)
-        # May return 404 or 405 depending on route matching; either way not 200
         self.assertNotEqual(response.status_code, 200)
 
     def test_update_categories(self):
@@ -351,40 +414,35 @@ class BlogPostDeleteTests(TestCase):
 
     def test_owner_can_delete_own_post(self):
         post = self._new_post(self.editor)
-        client = logged_in_client(self.editor)
-        response = client.delete(f'/api/blog/posts/{post.id}/')
+        response = jwt_client(self.editor).delete(f'/api/blog/posts/{post.id}/')
         self.assertEqual(response.status_code, 200)
         self.assertFalse(BlogPost.objects.filter(id=post.id).exists())
 
     def test_non_owner_cannot_delete_post(self):
         post = self._new_post(self.editor)
-        client = logged_in_client(self.other_editor)
-        response = client.delete(f'/api/blog/posts/{post.id}/')
+        response = jwt_client(self.other_editor).delete(f'/api/blog/posts/{post.id}/')
         self.assertEqual(response.status_code, 403)
         self.assertTrue(BlogPost.objects.filter(id=post.id).exists())
 
     def test_admin_can_delete_any_post(self):
         post = self._new_post(self.editor)
-        client = logged_in_client(self.admin)
-        response = client.delete(f'/api/blog/posts/{post.id}/')
+        response = jwt_client(self.admin).delete(f'/api/blog/posts/{post.id}/')
         self.assertEqual(response.status_code, 200)
         self.assertFalse(BlogPost.objects.filter(id=post.id).exists())
 
     def test_unauthenticated_cannot_delete_post(self):
         post = self._new_post()
         response = Client().delete(f'/api/blog/posts/{post.id}/')
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
         self.assertTrue(BlogPost.objects.filter(id=post.id).exists())
 
     def test_delete_nonexistent_post_returns_404(self):
-        client = logged_in_client(self.admin)
-        response = client.delete('/api/blog/posts/99999/')
+        response = jwt_client(self.admin).delete('/api/blog/posts/99999/')
         self.assertEqual(response.status_code, 404)
 
     def test_reader_cannot_delete_post(self):
         post = self._new_post(self.editor)
-        client = logged_in_client(self.reader)
-        response = client.delete(f'/api/blog/posts/{post.id}/')
+        response = jwt_client(self.reader).delete(f'/api/blog/posts/{post.id}/')
         self.assertEqual(response.status_code, 403)
 
 
@@ -404,8 +462,7 @@ class MyPostsTests(TestCase):
         make_post('Others Post', self.other, status='published', slug='others-post')
 
     def test_authenticated_gets_own_posts(self):
-        client = logged_in_client(self.editor)
-        response = client.get('/api/blog/my-posts/')
+        response = jwt_client(self.editor).get('/api/blog/my-posts/')
         self.assertEqual(response.status_code, 200)
         titles = {p['title'] for p in json.loads(response.content)}
         self.assertIn('My Draft', titles)
@@ -413,21 +470,186 @@ class MyPostsTests(TestCase):
         self.assertNotIn('Others Post', titles)
 
     def test_includes_drafts(self):
-        client = logged_in_client(self.editor)
-        response = client.get('/api/blog/my-posts/')
+        response = jwt_client(self.editor).get('/api/blog/my-posts/')
         statuses = {p['status'] for p in json.loads(response.content)}
         self.assertIn('draft', statuses)
 
-    def test_unauthenticated_returns_403(self):
+    def test_unauthenticated_returns_401(self):
         response = Client().get('/api/blog/my-posts/')
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
     def test_each_user_sees_only_their_posts(self):
-        client = logged_in_client(self.other)
-        response = client.get('/api/blog/my-posts/')
+        response = jwt_client(self.other).get('/api/blog/my-posts/')
         data = json.loads(response.content)
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['title'], 'Others Post')
+
+
+# ---------------------------------------------------------------------------
+# Comment Tests
+# ---------------------------------------------------------------------------
+
+class CommentTests(TestCase):
+    """Tests for /api/blog/posts/{post_id}/comments/ and /api/blog/comments/{id}/"""
+
+    def setUp(self):
+        self.reader = make_user('reader', 'reader@example.com', role='reader')
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.other = make_user('other', 'other@example.com', role='reader')
+        self.post = make_post('Test Post', self.editor, status='published', slug='test-post')
+
+    def _comments_url(self):
+        return f'/api/blog/posts/{self.post.id}/comments/'
+
+    def _comment_url(self, cid):
+        return f'/api/blog/comments/{cid}/'
+
+    def _create_comment(self, user, content=None, parent_id=None):
+        payload = {'content_json': content or LEXICAL_JSON}
+        if parent_id:
+            payload['parent_id'] = parent_id
+        return jwt_client(user).post(
+            self._comments_url(),
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+    # ── List ──────────────────────────────────────────────────────────────
+
+    def test_list_comments_is_public(self):
+        response = Client().get(self._comments_url())
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_returns_empty_list_when_no_comments(self):
+        response = Client().get(self._comments_url())
+        self.assertEqual(json.loads(response.content), [])
+
+    def test_list_returns_existing_comments(self):
+        self._create_comment(self.reader)
+        response = Client().get(self._comments_url())
+        data = json.loads(response.content)
+        self.assertEqual(len(data), 1)
+
+    def test_list_for_nonexistent_post_returns_404(self):
+        response = Client().get('/api/blog/posts/99999/comments/')
+        self.assertEqual(response.status_code, 404)
+
+    # ── Create ────────────────────────────────────────────────────────────
+
+    def test_authenticated_can_create_comment(self):
+        response = self._create_comment(self.reader)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertEqual(data['author']['username'], 'reader')
+        self.assertFalse(data['is_deleted'])
+
+    def test_unauthenticated_cannot_create_comment(self):
+        response = Client().post(
+            self._comments_url(),
+            data=json.dumps({'content_json': LEXICAL_JSON}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_comment_on_nonexistent_post_returns_404(self):
+        response = jwt_client(self.reader).post(
+            '/api/blog/posts/99999/comments/',
+            data=json.dumps({'content_json': LEXICAL_JSON}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_reply_creates_nested_comment(self):
+        parent_resp = self._create_comment(self.reader)
+        parent_id = json.loads(parent_resp.content)['id']
+
+        reply_resp = self._create_comment(self.other, parent_id=parent_id)
+        self.assertEqual(reply_resp.status_code, 200)
+
+        # The reply should appear nested under parent in the tree
+        tree = json.loads(Client().get(self._comments_url()).content)
+        self.assertEqual(len(tree), 1)
+        self.assertEqual(len(tree[0]['replies']), 1)
+        self.assertEqual(tree[0]['replies'][0]['author']['username'], 'other')
+
+    def test_reply_to_nonexistent_parent_returns_404(self):
+        response = jwt_client(self.reader).post(
+            self._comments_url(),
+            data=json.dumps({'content_json': LEXICAL_JSON, 'parent_id': 99999}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 404)
+
+    def test_comment_author_includes_avatar_url(self):
+        resp = self._create_comment(self.reader)
+        data = json.loads(resp.content)
+        self.assertIn('avatar_url', data['author'])
+
+    # ── Edit ──────────────────────────────────────────────────────────────
+
+    def test_owner_can_edit_own_comment(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        new_content = json.dumps({"root": {"type": "root", "children": []}})
+        response = jwt_client(self.reader).put(
+            self._comment_url(comment_id),
+            data=json.dumps({'content_json': new_content}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['content_json'], new_content)
+
+    def test_non_owner_cannot_edit_comment(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        response = jwt_client(self.other).put(
+            self._comment_url(comment_id),
+            data=json.dumps({'content_json': LEXICAL_JSON}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_cannot_edit_comment(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        response = Client().put(
+            self._comment_url(comment_id),
+            data=json.dumps({'content_json': LEXICAL_JSON}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 401)
+
+    # ── Delete ────────────────────────────────────────────────────────────
+
+    def test_owner_can_delete_own_comment(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        response = jwt_client(self.reader).delete(self._comment_url(comment_id))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Comment.objects.get(id=comment_id).is_deleted)
+
+    def test_admin_can_delete_any_comment(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        response = jwt_client(self.admin).delete(self._comment_url(comment_id))
+        self.assertEqual(response.status_code, 200)
+        self.assertTrue(Comment.objects.get(id=comment_id).is_deleted)
+
+    def test_non_owner_cannot_delete_comment(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        response = jwt_client(self.other).delete(self._comment_url(comment_id))
+        self.assertEqual(response.status_code, 403)
+        self.assertFalse(Comment.objects.get(id=comment_id).is_deleted)
+
+    def test_unauthenticated_cannot_delete_comment(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        response = Client().delete(self._comment_url(comment_id))
+        self.assertEqual(response.status_code, 401)
+
+    def test_deleted_comment_body_hidden_in_list(self):
+        comment_id = json.loads(self._create_comment(self.reader).content)['id']
+        jwt_client(self.reader).delete(self._comment_url(comment_id))
+
+        tree = json.loads(Client().get(self._comments_url()).content)
+        self.assertTrue(tree[0]['is_deleted'])
+        self.assertIsNone(tree[0]['content_json'])
+        self.assertIsNone(tree[0]['author'])
 
 
 # ---------------------------------------------------------------------------
@@ -556,3 +778,244 @@ class BlogModelTests(TestCase):
 
     def test_category_str(self):
         self.assertEqual(str(Category(name='My Category')), 'My Category')
+
+
+# ---------------------------------------------------------------------------
+# Image Upload Tests (POST /api/blog/upload-image/)
+# ---------------------------------------------------------------------------
+
+class ImageUploadTests(TestCase):
+    """Tests for POST /api/blog/upload-image/ — blog post image uploads."""
+
+    def setUp(self):
+        self.client = Client()
+        self.upload_url = '/api/blog/upload-image/'
+        self.token_url = '/api/token/pair'
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.admin = make_user('admin', 'admin@example.com', role='admin')
+        self.reader = make_user('reader', 'reader@example.com', role='reader')
+        
+        from io import BytesIO
+        from PIL import Image
+        
+        # Create test images
+        img = Image.new('RGB', (200, 200), color='blue')
+        self.test_jpeg = BytesIO()
+        img.save(self.test_jpeg, format='JPEG')
+        self.test_jpeg.seek(0)
+        self.test_jpeg.name = 'test.jpg'
+        
+        img_png = Image.new('RGB', (200, 200), color='green')
+        self.test_png = BytesIO()
+        img_png.save(self.test_png, format='PNG')
+        self.test_png.seek(0)
+        self.test_png.name = 'test.png'
+        
+        img_webp = Image.new('RGB', (200, 200), color='red')
+        self.test_webp = BytesIO()
+        img_webp.save(self.test_webp, format='WebP')
+        self.test_webp.seek(0)
+        self.test_webp.name = 'test.webp'
+
+    def _get_access_token(self, user):
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': user.username, 'password': 'ValidPass123'}),
+            content_type='application/json'
+        )
+        return json.loads(response.content)['access']
+
+    def test_upload_image_editor_returns_200(self):
+        """Editor can upload images."""
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_image_admin_returns_200(self):
+        """Admin can upload images."""
+        token = self._get_access_token(self.admin)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_image_reader_returns_403(self):
+        """Reader cannot upload images (permission denied)."""
+        token = self._get_access_token(self.reader)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 403)
+
+    def test_upload_image_unauthenticated_returns_401(self):
+        """Upload without token returns 401."""
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_upload_image_returns_url(self):
+        """Response includes the image URL."""
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body = json.loads(response.content)
+        self.assertIn('url', body)
+        self.assertIn('blog_images/', body['url'])
+
+    def test_upload_image_accepts_jpeg(self):
+        """JPEG images are accepted."""
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_image_accepts_png(self):
+        """PNG images are accepted."""
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_png},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_image_accepts_webp(self):
+        """WebP images are accepted."""
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_webp},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_image_accepts_gif(self):
+        """GIF images are accepted."""
+        from io import BytesIO
+        from PIL import Image
+        
+        img_gif = Image.new('RGB', (200, 200), color='yellow')
+        test_gif = BytesIO()
+        img_gif.save(test_gif, format='GIF')
+        test_gif.seek(0)
+        test_gif.name = 'test.gif'
+        
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {'file': test_gif},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_image_rejects_invalid_format(self):
+        """Non-image files are rejected."""
+        from io import BytesIO
+        token = self._get_access_token(self.editor)
+        
+        invalid_file = BytesIO(b'not an image')
+        invalid_file.name = 'fake.txt'
+        
+        response = self.client.post(
+            self.upload_url,
+            {'file': invalid_file},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 400)
+
+    def test_upload_image_rejects_oversized_image(self):
+        """Images over 10 MB are rejected."""
+        from io import BytesIO
+        from PIL import Image
+        
+        # Create a large image
+        img = Image.new('RGB', (10000, 10000), color='red')
+        large_img = BytesIO()
+        img.save(large_img, format='JPEG', quality=95)
+        large_img.seek(0)
+        large_img.name = 'large.jpg'
+        
+        # Check size
+        large_img.seek(0, 2)
+        size = large_img.tell()
+        large_img.seek(0)
+        
+        if size > 10 * 1024 * 1024:
+            token = self._get_access_token(self.editor)
+            response = self.client.post(
+                self.upload_url,
+                {'file': large_img},
+                HTTP_AUTHORIZATION=f'Bearer {token}'
+            )
+            self.assertEqual(response.status_code, 400)
+
+    def test_upload_image_url_includes_media_url_prefix(self):
+        """Returned URL includes the MEDIA_URL prefix."""
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body = json.loads(response.content)
+        # Should include /media/ prefix
+        self.assertIn('/media/', body['url'])
+
+    def test_upload_image_multiple_uploads_different_urls(self):
+        """Multiple image uploads return different URLs."""
+        token = self._get_access_token(self.editor)
+        
+        response1 = self.client.post(
+            self.upload_url,
+            {'file': self.test_jpeg},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body1 = json.loads(response1.content)
+        url1 = body1['url']
+        
+        # Reset file pointer
+        from io import BytesIO
+        from PIL import Image
+        img = Image.new('RGB', (200, 200), color='purple')
+        img2_file = BytesIO()
+        img.save(img2_file, format='JPEG')
+        img2_file.seek(0)
+        img2_file.name = 'test2.jpg'
+        
+        response2 = self.client.post(
+            self.upload_url,
+            {'file': img2_file},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body2 = json.loads(response2.content)
+        url2 = body2['url']
+        
+        # URLs should be different
+        self.assertNotEqual(url1, url2)
+
+    def test_upload_image_missing_file_returns_error(self):
+        """POST without file field returns error."""
+        token = self._get_access_token(self.editor)
+        response = self.client.post(
+            self.upload_url,
+            {},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        # Should fail (either 400 or 422)
+        self.assertNotEqual(response.status_code, 200)

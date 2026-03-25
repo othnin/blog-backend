@@ -2,7 +2,7 @@
 Serializers for blog models using Pydantic and Django Ninja.
 Handles validation and serialization for API endpoints.
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 import json
@@ -120,6 +120,31 @@ class BlogPostUpdateIn(BaseModel):
         return v
 
 
+class BlogPostAuthorOut(BaseModel):
+    """Author info embedded in blog post responses — includes resolved avatar_url."""
+    id: int
+    username: str
+    avatar_url: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+    @model_validator(mode='before')
+    @classmethod
+    def resolve_avatar(cls, data):
+        if hasattr(data, 'id'):  # ORM User object
+            try:
+                from django.conf import settings
+                avatar_url = (
+                    f"{settings.MEDIA_URL}{data.profile.avatar.name}"
+                    if data.profile.avatar else None
+                )
+            except Exception:
+                avatar_url = None
+            return {'id': data.id, 'username': data.username, 'avatar_url': avatar_url}
+        return data
+
+
 class BlogPostOut(BaseModel):
     """Output serializer for blog posts (full details)."""
     id: int
@@ -132,7 +157,7 @@ class BlogPostOut(BaseModel):
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-    author: UserWithProfileOut
+    author: BlogPostAuthorOut
     categories: List[CategoryOut] = Field(default_factory=list)
 
     class Config:

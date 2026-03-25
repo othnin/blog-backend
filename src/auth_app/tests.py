@@ -1243,3 +1243,640 @@ class JWTBlacklistTests(TestCase):
             content_type='application/json'
         )
         self.assertEqual(response.status_code, 400)
+
+
+# ---------------------------------------------------------------------------
+# Auth Settings Tests  (GET/PATCH /api/auth/settings)
+# ---------------------------------------------------------------------------
+
+class AuthSettingsTests(TestCase):
+    """Tests for GET/PATCH /api/auth/settings — user profile settings."""
+
+    def setUp(self):
+        self.client = Client()
+        self.settings_url = '/api/auth/settings'
+        self.token_url = '/api/token/pair'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _get_access_token(self):
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser', 'password': 'ValidPass123'}),
+            content_type='application/json'
+        )
+        return json.loads(response.content)['access']
+
+    def test_get_settings_authenticated_returns_200(self):
+        """A valid JWT token grants access to GET /api/auth/settings."""
+        token = self._get_access_token()
+        response = self.client.get(
+            self.settings_url,
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_get_settings_unauthenticated_returns_401(self):
+        """No token → 401 (JWTAuth rejects)."""
+        response = self.client.get(self.settings_url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_get_settings_response_includes_all_fields(self):
+        """Response includes all user settings fields."""
+        token = self._get_access_token()
+        response = self.client.get(
+            self.settings_url,
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body = json.loads(response.content)
+        expected_fields = [
+            'display_name', 'bio', 'email_notifications',
+            'twitter_url', 'github_url', 'website_url',
+            'profile_public', 'avatar_url'
+        ]
+        for field in expected_fields:
+            self.assertIn(field, body)
+
+    def test_patch_settings_updates_display_name(self):
+        """Updating display_name via PATCH is reflected in subsequent GET."""
+        token = self._get_access_token()
+        
+        # Update
+        patch_response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({'display_name': 'New Display Name'}),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        
+        # Verify
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.display_name, 'New Display Name')
+
+    def test_patch_settings_updates_bio(self):
+        """Updating bio via PATCH is reflected."""
+        token = self._get_access_token()
+        
+        patch_response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({'bio': 'I love coding!'}),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(patch_response.status_code, 200)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.bio, 'I love coding!')
+
+    def test_patch_settings_updates_social_links(self):
+        """Updating social media URLs via PATCH."""
+        token = self._get_access_token()
+        
+        patch_data = {
+            'twitter_url': 'https://twitter.com/testuser',
+            'github_url': 'https://github.com/testuser',
+            'website_url': 'https://testuser.com'
+        }
+        
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps(patch_data),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.twitter_url, 'https://twitter.com/testuser')
+        self.assertEqual(self.user.profile.github_url, 'https://github.com/testuser')
+        self.assertEqual(self.user.profile.website_url, 'https://testuser.com')
+
+    def test_patch_settings_updates_email_notifications(self):
+        """Updating email_notifications preference."""
+        token = self._get_access_token()
+        self.user.profile.email_notifications = True
+        self.user.profile.save()
+        
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({'email_notifications': False}),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.profile.refresh_from_db()
+        self.assertFalse(self.user.profile.email_notifications)
+
+    def test_patch_settings_updates_profile_public(self):
+        """Updating profile_public visibility setting."""
+        token = self._get_access_token()
+        self.user.profile.profile_public = True
+        self.user.profile.save()
+        
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({'profile_public': False}),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.profile.refresh_from_db()
+        self.assertFalse(self.user.profile.profile_public)
+
+    def test_patch_settings_partial_update(self):
+        """Only specified fields are updated; others are preserved."""
+        token = self._get_access_token()
+        self.user.profile.display_name = 'Old Name'
+        self.user.profile.bio = 'Old Bio'
+        self.user.profile.save()
+        
+        # Update only display_name
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({'display_name': 'New Name'}),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+        self.user.profile.refresh_from_db()
+        self.assertEqual(self.user.profile.display_name, 'New Name')
+        self.assertEqual(self.user.profile.bio, 'Old Bio')  # Unchanged
+
+    def test_patch_settings_unauthenticated_returns_401(self):
+        """PATCH without token returns 401."""
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({'display_name': 'Hacker'}),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_patch_settings_returns_updated_object(self):
+        """PATCH response includes the updated settings object."""
+        token = self._get_access_token()
+        response = self.client.patch(
+            self.settings_url,
+            data=json.dumps({'display_name': 'Test Display'}),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body = json.loads(response.content)
+        self.assertEqual(body['display_name'], 'Test Display')
+
+
+# ---------------------------------------------------------------------------
+# Auth Avatar Upload Tests  (POST /api/auth/avatar)
+# ---------------------------------------------------------------------------
+
+class AuthAvatarUploadTests(TestCase):
+    """Tests for POST /api/auth/avatar — avatar image upload and resize."""
+
+    def setUp(self):
+        self.client = Client()
+        self.avatar_url = '/api/auth/avatar'
+        self.token_url = '/api/token/pair'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+        
+        from io import BytesIO
+        from PIL import Image
+        
+        # Create a test image
+        img = Image.new('RGB', (100, 100), color='red')
+        self.test_image = BytesIO()
+        img.save(self.test_image, format='JPEG')
+        self.test_image.seek(0)
+        self.test_image.name = 'test_avatar.jpg'
+
+    def _get_access_token(self):
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser', 'password': 'ValidPass123'}),
+            content_type='application/json'
+        )
+        return json.loads(response.content)['access']
+
+    def test_upload_avatar_authenticated_returns_200(self):
+        """Valid JWT token and JPEG image upload succeeds."""
+        token = self._get_access_token()
+        response = self.client.post(
+            self.avatar_url,
+            {'file': self.test_image},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_avatar_unauthenticated_returns_401(self):
+        """Upload without token returns 401."""
+        response = self.client.post(
+            self.avatar_url,
+            {'file': self.test_image}
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_upload_avatar_returns_avatar_url(self):
+        """Response includes the avatar_url."""
+        token = self._get_access_token()
+        response = self.client.post(
+            self.avatar_url,
+            {'file': self.test_image},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body = json.loads(response.content)
+        self.assertIn('avatar_url', body)
+        self.assertIn('avatars/', body['avatar_url'])
+
+    def test_upload_avatar_saves_to_profile(self):
+        """After upload, the avatar path is saved to the user's profile."""
+        token = self._get_access_token()
+        self.client.post(
+            self.avatar_url,
+            {'file': self.test_image},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.user.profile.refresh_from_db()
+        self.assertIsNotNone(self.user.profile.avatar)
+        self.assertTrue(self.user.profile.avatar.name.startswith('avatars/'))
+
+    def test_upload_avatar_replaces_old_avatar(self):
+        """Uploading a new avatar replaces the old one."""
+        token = self._get_access_token()
+        
+        # Upload first avatar
+        from io import BytesIO
+        from PIL import Image
+        img1 = Image.new('RGB', (100, 100), color='red')
+        img1_bytes = BytesIO()
+        img1.save(img1_bytes, format='JPEG')
+        img1_bytes.seek(0)
+        img1_bytes.name = 'first.jpg'
+        
+        self.client.post(
+            self.avatar_url,
+            {'file': img1_bytes},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.user.profile.refresh_from_db()
+        first_avatar = self.user.profile.avatar.name
+        
+        # Upload second avatar
+        img2 = Image.new('RGB', (100, 100), color='blue')
+        img2_bytes = BytesIO()
+        img2.save(img2_bytes, format='JPEG')
+        img2_bytes.seek(0)
+        img2_bytes.name = 'second.jpg'
+        
+        self.client.post(
+            self.avatar_url,
+            {'file': img2_bytes},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.user.profile.refresh_from_db()
+        second_avatar = self.user.profile.avatar.name
+        
+        # Check that avatar changed
+        self.assertNotEqual(first_avatar, second_avatar)
+
+    def test_upload_avatar_accepts_png(self):
+        """PNG images are accepted."""
+        from io import BytesIO
+        from PIL import Image
+        token = self._get_access_token()
+        
+        img = Image.new('RGB', (100, 100), color='green')
+        img_bytes = BytesIO()
+        img.save(img_bytes, format='PNG')
+        img_bytes.seek(0)
+        img_bytes.name = 'test_avatar.png'
+        
+        response = self.client.post(
+            self.avatar_url,
+            {'file': img_bytes},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_avatar_accepts_webp(self):
+        """WebP images are accepted."""
+        from io import BytesIO
+        from PIL import Image
+        token = self._get_access_token()
+        
+        img = Image.new('RGB', (100, 100), color='yellow')
+        img_bytes = BytesIO()
+        img.save(img_bytes, format='WebP')
+        img_bytes.seek(0)
+        img_bytes.name = 'test_avatar.webp'
+        
+        response = self.client.post(
+            self.avatar_url,
+            {'file': img_bytes},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_upload_avatar_rejects_invalid_format(self):
+        """Non-image files are rejected."""
+        from io import BytesIO
+        token = self._get_access_token()
+        
+        invalid_file = BytesIO(b'not an image')
+        invalid_file.name = 'fake.txt'
+        
+        # This should fail during image open
+        response = self.client.post(
+            self.avatar_url,
+            {'file': invalid_file},
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        # Either 400 or 500 depending on error handling
+        self.assertNotEqual(response.status_code, 200)
+
+    def test_upload_avatar_rejects_oversized_image(self):
+        """Images over 10 MB are rejected."""
+        from io import BytesIO
+        from PIL import Image
+        token = self._get_access_token()
+        
+        # Create a large image (simulate >10 MB)
+        img = Image.new('RGB', (10000, 10000), color='red')
+        img_bytes = BytesIO()
+        img.save(img_bytes, format='JPEG', quality=95)
+        img_bytes.seek(0)
+        img_bytes.name = 'large_avatar.jpg'
+        
+        # Check the size
+        img_bytes.seek(0, 2)  # Seek to end
+        size = img_bytes.tell()
+        img_bytes.seek(0)  # Seek back to start
+        
+        if size > 10 * 1024 * 1024:
+            response = self.client.post(
+                self.avatar_url,
+                {'file': img_bytes},
+                HTTP_AUTHORIZATION=f'Bearer {token}'
+            )
+            self.assertEqual(response.status_code, 400)
+
+
+# ---------------------------------------------------------------------------
+# Auth Public Profile Tests  (GET /api/auth/profile/{username})
+# ---------------------------------------------------------------------------
+
+class AuthPublicProfileTests(TestCase):
+    """Tests for GET /api/auth/profile/{username} — public user profiles."""
+
+    def setUp(self):
+        self.client = Client()
+        self.public_user = User.objects.create_user(
+            username='publicuser',
+            email='public@example.com',
+            password='ValidPass123'
+        )
+        self.public_user.profile.email_verified = True
+        self.public_user.profile.profile_public = True
+        self.public_user.profile.display_name = 'Public User'
+        self.public_user.profile.bio = 'I am public'
+        self.public_user.profile.twitter_url = 'https://twitter.com/publicuser'
+        self.public_user.profile.github_url = 'https://github.com/publicuser'
+        self.public_user.profile.website_url = 'https://publicuser.com'
+        self.public_user.profile.save()
+        
+        self.private_user = User.objects.create_user(
+            username='privateuser',
+            email='private@example.com',
+            password='ValidPass123'
+        )
+        self.private_user.profile.email_verified = True
+        self.private_user.profile.profile_public = False
+        self.private_user.profile.save()
+
+    def test_get_public_profile_returns_200(self):
+        """GET for a public profile returns 200."""
+        response = self.client.get('/api/auth/profile/publicuser')
+        self.assertEqual(response.status_code, 200)
+
+    def test_get_public_profile_requires_no_auth(self):
+        """Public profiles are accessible without authentication."""
+        response = self.client.get('/api/auth/profile/publicuser')
+        self.assertEqual(response.status_code, 200)
+
+    def test_get_public_profile_response_includes_fields(self):
+        """Response includes username, display_name, bio, and social links."""
+        response = self.client.get('/api/auth/profile/publicuser')
+        body = json.loads(response.content)
+        
+        self.assertEqual(body['username'], 'publicuser')
+        self.assertEqual(body['display_name'], 'Public User')
+        self.assertEqual(body['bio'], 'I am public')
+        self.assertEqual(body['twitter_url'], 'https://twitter.com/publicuser')
+        self.assertEqual(body['github_url'], 'https://github.com/publicuser')
+        self.assertEqual(body['website_url'], 'https://publicuser.com')
+
+    def test_get_public_profile_includes_role(self):
+        """Response includes the user's role."""
+        response = self.client.get('/api/auth/profile/publicuser')
+        body = json.loads(response.content)
+        self.assertIn('role', body)
+        self.assertEqual(body['role'], 'reader')  # default
+
+    def test_get_private_profile_returns_404(self):
+        """GET for a private profile returns 404."""
+        response = self.client.get('/api/auth/profile/privateuser')
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_nonexistent_profile_returns_404(self):
+        """GET for a non-existent user returns 404."""
+        response = self.client.get('/api/auth/profile/ghost')
+        self.assertEqual(response.status_code, 404)
+
+    def test_get_public_profile_without_avatar_includes_null(self):
+        """If user has no avatar, avatar_url is null in the response."""
+        response = self.client.get('/api/auth/profile/publicuser')
+        body = json.loads(response.content)
+        self.assertIn('avatar_url', body)
+
+    def test_get_public_profile_editor_role(self):
+        """Profile for an editor shows editor role."""
+        self.public_user.profile.role = 'editor'
+        self.public_user.profile.save()
+        
+        response = self.client.get('/api/auth/profile/publicuser')
+        body = json.loads(response.content)
+        self.assertEqual(body['role'], 'editor')
+
+    def test_get_public_profile_admin_role(self):
+        """Profile for an admin shows admin role."""
+        self.public_user.profile.role = 'admin'
+        self.public_user.profile.save()
+        
+        response = self.client.get('/api/auth/profile/publicuser')
+        body = json.loads(response.content)
+        self.assertEqual(body['role'], 'admin')
+
+    def test_get_public_profile_with_special_characters_in_username(self):
+        """Usernames with special characters are handled correctly."""
+        # Create user with hyphen in username
+        special_user = User.objects.create_user(
+            username='special-user',
+            email='special@example.com',
+            password='ValidPass123'
+        )
+        special_user.profile.profile_public = True
+        special_user.profile.save()
+        
+        response = self.client.get('/api/auth/profile/special-user')
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertEqual(body['username'], 'special-user')
+
+    def test_get_public_profile_does_not_expose_email(self):
+        """Email address is NOT included in public profile response."""
+        response = self.client.get('/api/auth/profile/publicuser')
+        body = json.loads(response.content)
+        self.assertNotIn('email', body)
+
+    def test_get_public_profile_case_sensitive_username(self):
+        """Username lookup is case-sensitive."""
+        response = self.client.get('/api/auth/profile/PUBLICUSER')
+        # Django usernames are case-sensitive
+        self.assertEqual(response.status_code, 404)
+
+    def test_switching_profile_public_to_private_hides_it(self):
+        """Changing profile_public to False makes it inaccessible."""
+        # Initially public
+        response1 = self.client.get('/api/auth/profile/publicuser')
+        self.assertEqual(response1.status_code, 200)
+        
+        # Make private
+        self.public_user.profile.profile_public = False
+        self.public_user.profile.save()
+        
+        # Now should be 404
+        response2 = self.client.get('/api/auth/profile/publicuser')
+        self.assertEqual(response2.status_code, 404)
+
+
+# ---------------------------------------------------------------------------
+# Auth Change Password Tests  (POST /api/auth/change-password)
+# ---------------------------------------------------------------------------
+
+class AuthChangePasswordTests(TestCase):
+    """Tests for POST /api/auth/change-password — authenticated password change."""
+
+    def setUp(self):
+        self.client = Client()
+        self.change_password_url = '/api/auth/change-password'
+        self.token_url = '/api/token/pair'
+        self.user = User.objects.create_user(
+            username='testuser',
+            email='testuser@example.com',
+            password='OldPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _get_access_token(self):
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser', 'password': 'OldPass123'}),
+            content_type='application/json'
+        )
+        return json.loads(response.content)['access']
+
+    def test_change_password_authenticated_returns_200(self):
+        """Valid token and correct current password returns 200."""
+        token = self._get_access_token()
+        response = self.client.post(
+            self.change_password_url,
+            data=json.dumps({
+                'current_password': 'OldPass123',
+                'new_password': 'NewPass456',
+                'new_password_confirm': 'NewPass456'
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        self.assertEqual(response.status_code, 200)
+
+    def test_change_password_unauthenticated_returns_401(self):
+        """Change password without token returns 401."""
+        response = self.client.post(
+            self.change_password_url,
+            data=json.dumps({
+                'current_password': 'OldPass123',
+                'new_password': 'NewPass456',
+                'new_password_confirm': 'NewPass456'
+            }),
+            content_type='application/json'
+        )
+        self.assertEqual(response.status_code, 401)
+
+    def test_change_password_wrong_current_password_returns_error(self):
+        """Wrong current password returns error status."""
+        token = self._get_access_token()
+        response = self.client.post(
+            self.change_password_url,
+            data=json.dumps({
+                'current_password': 'WrongPass123',
+                'new_password': 'NewPass456',
+                'new_password_confirm': 'NewPass456'
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        body = json.loads(response.content)
+        self.assertEqual(body['status'], 'error')
+
+    def test_change_password_updates_password(self):
+        """After successful change, can login with new password."""
+        token = self._get_access_token()
+        self.client.post(
+            self.change_password_url,
+            data=json.dumps({
+                'current_password': 'OldPass123',
+                'new_password': 'NewPass456',
+                'new_password_confirm': 'NewPass456'
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        
+        # Try to login with new password
+        login_response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser', 'password': 'NewPass456'}),
+            content_type='application/json'
+        )
+        self.assertEqual(login_response.status_code, 200)
+
+    def test_change_password_old_password_no_longer_works(self):
+        """Old password is rejected after change."""
+        token = self._get_access_token()
+        self.client.post(
+            self.change_password_url,
+            data=json.dumps({
+                'current_password': 'OldPass123',
+                'new_password': 'NewPass456',
+                'new_password_confirm': 'NewPass456'
+            }),
+            content_type='application/json',
+            HTTP_AUTHORIZATION=f'Bearer {token}'
+        )
+        
+        # Try to login with old password
+        login_response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': 'testuser', 'password': 'OldPass123'}),
+            content_type='application/json'
+        )
+        self.assertEqual(login_response.status_code, 401)

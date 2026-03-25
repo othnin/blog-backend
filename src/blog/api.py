@@ -102,7 +102,10 @@ class BlogController:
         - Public endpoint for published posts
         - Increments view count when accessed
         """
-        blog_post = get_object_or_404(BlogPost, slug=slug, status='published')
+        blog_post = get_object_or_404(
+            BlogPost.objects.select_related('author', 'author__profile').prefetch_related('categories'),
+            slug=slug, status='published'
+        )
         
         # Increment view count asynchronously
         blog_post.increment_view_count()
@@ -162,10 +165,11 @@ class BlogController:
         """
         request = self.context.request
         user = request.user
+        qs = BlogPost.objects.select_related('author', 'author__profile').prefetch_related('categories')
         try:
-            blog_post = BlogPost.objects.get(id=int(slug))
+            blog_post = qs.get(id=int(slug))
         except (ValueError, BlogPost.DoesNotExist):
-            blog_post = get_object_or_404(BlogPost, slug=slug)
+            blog_post = get_object_or_404(qs, slug=slug)
 
         if not can_edit_post(user, blog_post):
             raise HttpError(403, "You do not have permission to edit this blog post")
