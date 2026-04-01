@@ -59,6 +59,29 @@ class UserWithProfileOut(UserBasicOut):
             return None
 
 
+class TagOut(BaseModel):
+    """Tag output serializer."""
+    id: int
+    name: str
+    slug: str
+    meta_description: str = ''
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class TagCreateIn(BaseModel):
+    """Input serializer for creating a tag."""
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class TagUpdateIn(BaseModel):
+    """Input serializer for updating a tag."""
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    meta_description: Optional[str] = None
+
+
 class CategoryCreateIn(BaseModel):
     """Input serializer for creating a category."""
     name: str = Field(..., min_length=1, max_length=100)
@@ -69,6 +92,7 @@ class BlogPostCreateIn(BaseModel):
     title: str = Field(..., min_length=1, max_length=500)
     content_json: str = Field(..., description="Lexical editor JSON format")
     category_id: Optional[int] = None
+    tag_ids: Optional[List[int]] = None
     status: str = Field(default='draft')
 
     @field_validator('status')
@@ -94,6 +118,7 @@ class BlogPostUpdateIn(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
     content_json: Optional[str] = None
     category_id: Optional[int] = None
+    tag_ids: Optional[List[int]] = None
     status: Optional[str] = None
 
     @field_validator('status')
@@ -157,9 +182,17 @@ class BlogPostOut(BaseModel):
     updated_at: datetime
     author: BlogPostAuthorOut
     category: Optional[CategoryOut] = None
+    tags: List[TagOut] = []
 
     class Config:
         from_attributes = True
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def coerce_tags(cls, v):
+        if hasattr(v, 'all'):
+            return list(v.all())
+        return v
 
 
 class CommentAuthorOut(BaseModel):
@@ -231,10 +264,18 @@ class BlogPostListOut(BaseModel):
     created_at: datetime
     author: UserBasicOut
     category: Optional[CategoryOut] = None
+    tags: List[TagOut] = []
     content_text: str = ''
 
     class Config:
         from_attributes = True
+
+    @field_validator('tags', mode='before')
+    @classmethod
+    def coerce_tags(cls, v):
+        if hasattr(v, 'all'):
+            return list(v.all())
+        return v
 
 
 class LikeOut(BaseModel):

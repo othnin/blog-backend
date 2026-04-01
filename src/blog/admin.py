@@ -1,9 +1,16 @@
 from django.contrib import admin
-from .models import Category, BlogPost
+from .models import Category, Tag, BlogPost
 
 
 @admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
+    list_display = ('name', 'slug', 'created_at')
+    search_fields = ('name',)
+    prepopulated_fields = {'slug': ('name',)}
+
+
+@admin.register(Tag)
+class TagAdmin(admin.ModelAdmin):
     list_display = ('name', 'slug', 'created_at')
     search_fields = ('name',)
     prepopulated_fields = {'slug': ('name',)}
@@ -14,6 +21,7 @@ class BlogPostAdmin(admin.ModelAdmin):
     list_display = ('title', 'author', 'status', 'view_count', 'published_at', 'created_at')
     list_filter = ('status', 'created_at', 'published_at')
     search_fields = ('title', 'slug', 'author__username')
+    filter_horizontal = ('tags',)
     readonly_fields = ('view_count', 'created_at', 'updated_at')
     prepopulated_fields = {'slug': ('title',)}
 
@@ -25,7 +33,7 @@ class BlogPostAdmin(admin.ModelAdmin):
             'fields': ('content_json',)
         }),
         ('Metadata', {
-            'fields': ('category', 'status', 'view_count')
+            'fields': ('category', 'tags', 'status', 'view_count')
         }),
         ('Publishing', {
             'fields': ('published_at', 'created_at', 'updated_at'),

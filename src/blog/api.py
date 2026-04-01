@@ -9,9 +9,10 @@ from ninja_jwt.authentication import JWTAuth
 from .permissions import IsEditorOrAdmin
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
+from django.utils.text import slugify
 from django.conf import settings
 from typing import List, Optional
-from .models import BlogPost, Category, Comment
+from .models import BlogPost, Category, Comment, Tag
 from ninja import File
 from ninja.files import UploadedFile
 import uuid, os
@@ -22,6 +23,9 @@ from .serializers import (
     BlogPostListOut,
     CategoryOut,
     CategoryCreateIn,
+    TagOut,
+    TagCreateIn,
+    TagUpdateIn,
     CommentIn,
     CommentUpdateIn,
     CommentOut,
@@ -67,11 +71,71 @@ class BlogController:
         - Requires editor or admin role
         - If a category with the same name already exists, returns the existing one
         """
-        from django.utils.text import slugify
+
         name = payload.name.strip()
         slug = slugify(name)
         category, _ = Category.objects.get_or_create(slug=slug, defaults={'name': name})
         return category
+
+    # ============= Tag Endpoints =============
+
+    @http_get(
+        "/tags/",
+        response=List[TagOut],
+        description="Get all tags"
+    )
+    def list_tags(self) -> List[TagOut]:
+        """Retrieve all tags."""
+        return Tag.objects.all().order_by('name')
+
+    @http_post(
+        "/tags/",
+        response=TagOut,
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated, IsEditorOrAdmin],
+        description="Create a new tag"
+    )
+    def create_tag(self, payload: TagCreateIn) -> TagOut:
+        """Create a new tag. Returns existing tag if slug already exists."""
+
+        name = payload.name.strip()
+        slug = slugify(name)
+        tag, _ = Tag.objects.get_or_create(slug=slug, defaults={'name': name})
+        return tag
+
+    @http_put(
+        "/tags/{tag_id}/",
+        response=TagOut,
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated, IsEditorOrAdmin],
+        description="Update a tag"
+    )
+    def update_tag(self, tag_id: int, payload: TagUpdateIn) -> TagOut:
+        """Update a tag's name and/or meta_description."""
+
+        tag = get_object_or_404(Tag, id=tag_id)
+        if payload.name is not None:
+            tag.name = payload.name.strip()
+            tag.slug = slugify(tag.name)
+        if payload.meta_description is not None:
+            tag.meta_description = payload.meta_description
+        tag.save()
+        return tag
+
+    @http_delete(
+        "/tags/{tag_id}/",
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated],
+        description="Delete a tag (admin only)"
+    )
+    def delete_tag(self, tag_id: int):
+        """Delete a tag. Admin only."""
+        request = self.context.request
+        if request.user.profile.role != 'admin':
+            raise HttpError(403, "Only admins can delete tags")
+        tag = get_object_or_404(Tag, id=tag_id)
+        tag.delete()
+        return {"success": True}
 
     # ============= Blog Post Endpoints =============
 
@@ -80,7 +144,7 @@ class BlogController:
         response=List[BlogPostListOut],
         description="Get published blog posts with optional filtering"
     )
-    def list_published_posts(self, limit: Optional[int] = None, category: Optional[str] = None, search: Optional[str] = None) -> List[BlogPostListOut]:
+    def list_published_posts(self, limit: Optional[int] = None, category: Optional[str] = None, search: Optional[str] = None, tags: Optional[str] = None) -> List[BlogPostListOut]:
         """
         Retrieve published blog posts.
         - Public endpoint (no auth required)
@@ -88,8 +152,9 @@ class BlogController:
         - Optional limit parameter
         - Optional category slug to filter by
         - Optional search query to filter by title or author
+        - Optional comma-separated tag slugs to filter by (AND logic)
         """
-        queryset = get_published_posts(limit=limit, category=category, search=search)
+        queryset = get_published_posts(limit=limit, category=category, search=search, tags=tags)
         return queryset
 
     @http_get(
@@ -104,7 +169,7 @@ class BlogController:
         - Increments view count when accessed
         """
         blog_post = get_object_or_404(
-            BlogPost.objects.select_related('author', 'author__profile', 'category'),
+            BlogPost.objects.select_related('author', 'author__profile', 'category').prefetch_related('tags'),
             slug=slug, status='published'
         )
         
@@ -158,6 +223,9 @@ class BlogController:
             category=category,
         )
 
+        if payload.tag_ids:
+            blog_post.tags.set(Tag.objects.filter(id__in=payload.tag_ids))
+
         return blog_post
 
     @http_put(
@@ -176,7 +244,7 @@ class BlogController:
         """
         request = self.context.request
         user = request.user
-        qs = BlogPost.objects.select_related('author', 'author__profile', 'category')
+        qs = BlogPost.objects.select_related('author', 'author__profile', 'category').prefetch_related('tags')
         try:
             blog_post = qs.get(id=int(slug))
         except (ValueError, BlogPost.DoesNotExist):
@@ -199,6 +267,10 @@ class BlogController:
         blog_post.category = get_object_or_404(Category, id=payload.category_id) if payload.category_id else None
 
         blog_post.save()
+
+        if payload.tag_ids is not None:
+            blog_post.tags.set(Tag.objects.filter(id__in=payload.tag_ids))
+
         return blog_post
 
     @http_delete(
@@ -229,12 +301,12 @@ class BlogController:
 
     @http_get(
         "/my-posts/",
-        response=List[BlogPostListOut],
+        response=List[BlogPostOut],
         auth=JWTAuth(),
         permissions=[IsAuthenticated],
         description="Get current user's blog posts"
     )
-    def get_my_posts(self) -> List[BlogPostListOut]:
+    def get_my_posts(self) -> List[BlogPostOut]:
         """
         Retrieve the current user's blog posts.
         - Requires authentication
@@ -245,6 +317,27 @@ class BlogController:
 
         posts = get_user_posts(user, include_drafts=True)
         return posts
+
+    @http_get(
+        "/my-posts/{post_id}",
+        response=BlogPostOut,
+        auth=JWTAuth(),
+        permissions=[IsAuthenticated],
+        description="Get a single post owned by the current user (any status)"
+    )
+    def get_my_post(self, post_id: int) -> BlogPostOut:
+        """
+        Retrieve a single post by ID for the authenticated owner.
+        - Admins can fetch any post
+        - Editors can only fetch their own posts
+        """
+        request = self.context.request
+        user = request.user
+        qs = BlogPost.objects.select_related('author', 'author__profile', 'category').prefetch_related('tags')
+        blog_post = get_object_or_404(qs, id=post_id)
+        if not can_edit_post(user, blog_post):
+            raise HttpError(403, "You do not have permission to view this post")
+        return blog_post
 
     @http_post(
         "/upload-image/",
@@ -347,7 +440,7 @@ class CommentController:
     )
     def list_comments(self, post_id: int) -> List[CommentOut]:
         """Public endpoint — returns all comments as a nested tree."""
-        post = get_object_or_404(BlogPost, id=post_id, status='published')
+        post = get_object_or_404(BlogPost, id=post_id)
         return _build_comment_tree(post)
 
     @http_post(
@@ -359,7 +452,9 @@ class CommentController:
     )
     def create_comment(self, post_id: int, payload: CommentIn) -> CommentOut:
         """Create a top-level comment or a reply. Any authenticated user can comment."""
-        post = get_object_or_404(BlogPost, id=post_id, status='published')
+        post = get_object_or_404(BlogPost, id=post_id)
+        if post.status != 'published':
+            raise HttpError(403, "Comments are only allowed on published posts")
         parent = None
         if payload.parent_id is not None:
             parent = get_object_or_404(Comment, id=payload.parent_id, post=post)

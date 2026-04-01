@@ -79,14 +79,19 @@ def can_delete_post(user, blog_post) -> bool:
     return can_edit_post(user, blog_post)
 
 
-def get_published_posts(limit: Optional[int] = None, category: Optional[str] = None, search: Optional[str] = None):
-    """Get all published blog posts, optionally filtered by category slug, search query, and limited."""
+def get_published_posts(limit: Optional[int] = None, category: Optional[str] = None, search: Optional[str] = None, tags: Optional[str] = None):
+    """Get all published blog posts, optionally filtered by category slug, tag slugs, search query, and limited."""
     queryset = BlogPost.objects.filter(
         status='published'
-    ).select_related('author', 'author__profile', 'category')
+    ).select_related('author', 'author__profile', 'category').prefetch_related('tags')
 
     if category:
         queryset = queryset.filter(category__slug=category)
+
+    if tags:
+        for tag_slug in [s.strip() for s in tags.split(',') if s.strip()]:
+            queryset = queryset.filter(tags__slug=tag_slug)
+        queryset = queryset.distinct()
 
     if search:
         queryset = queryset.filter(
@@ -105,7 +110,7 @@ def get_user_posts(user, include_drafts=True):
     """Get blog posts for a specific user."""
     queryset = BlogPost.objects.filter(author=user).select_related(
         'author', 'author__profile', 'category'
-    )
+    ).prefetch_related('tags')
 
     if not include_drafts:
         queryset = queryset.exclude(status='draft')

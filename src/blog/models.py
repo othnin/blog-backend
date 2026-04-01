@@ -62,6 +62,33 @@ class Category(models.Model):
         super().save(*args, **kwargs)
 
 
+class Tag(models.Model):
+    """
+    Tag model for granular keyword classification of blog posts.
+    """
+    name = models.CharField(max_length=100, unique=True, db_index=True)
+    slug = models.SlugField(max_length=100, unique=True, db_index=True)
+    meta_description = models.TextField(blank=True, default='')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        ordering = ['name']
+        verbose_name = 'Tag'
+        verbose_name_plural = 'Tags'
+        indexes = [
+            models.Index(fields=['slug']),
+        ]
+
+    def __str__(self):
+        return self.name
+
+    def save(self, *args, **kwargs):
+        if not self.slug:
+            self.slug = slugify(self.name)
+        super().save(*args, **kwargs)
+
+
 class BlogPost(models.Model):
     """
     Blog post model with Lexical editor support.
@@ -108,6 +135,12 @@ class BlogPost(models.Model):
         on_delete=models.SET_NULL,
         related_name='blog_posts',
         help_text='Category for this blog post'
+    )
+    tags = models.ManyToManyField(
+        Tag,
+        blank=True,
+        related_name='blog_posts',
+        help_text='Tags for this blog post'
     )
 
     # Status & Publishing
