@@ -232,6 +232,15 @@ class Comment(models.Model):
     """
     post = models.ForeignKey(
         BlogPost,
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='comments',
+    )
+    recipe = models.ForeignKey(
+        'recipes.Recipe',
+        null=True,
+        blank=True,
         on_delete=models.CASCADE,
         related_name='comments',
     )
@@ -261,7 +270,10 @@ class Comment(models.Model):
         ordering = ['created_at']
         indexes = [
             models.Index(fields=['post', 'parent', 'created_at']),
+            models.Index(fields=['recipe', 'parent', 'created_at']),
         ]
 
     def __str__(self):
-        return f'Comment {self.id} by {self.author_id} on post {self.post_id}'
+        if self.post_id:
+            return f'Comment {self.id} by {self.author_id} on post {self.post_id}'
+        return f'Comment {self.id} by {self.author_id} on recipe {self.recipe_id}'

@@ -54,6 +54,7 @@ INSTALLED_APPS = [
     # internal
     "auth_app",
     "blog",
+    "recipes",
 ]
 
 MIDDLEWARE = [

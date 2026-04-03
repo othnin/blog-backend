@@ -9,6 +9,7 @@ from ninja_jwt.tokens import RefreshToken
 from ninja_jwt.settings import api_settings as jwt_settings
 from auth_app.api import router as auth_router
 from blog.api import BlogController, CommentController
+from recipes.api import RecipeController, RecipeDetailController
 from auth_app.serializers import LoginSerializer
 from django.http import JsonResponse
 from django.contrib.auth import authenticate
@@ -141,6 +142,8 @@ api.add_router("/token/", token_router)
 api.add_router("/auth/", auth_router)
 api.register_controllers(BlogController)
 api.register_controllers(CommentController)
+api.register_controllers(RecipeController)   # static-prefix paths first
+api.register_controllers(RecipeDetailController)  # single-segment dynamic paths second
 
 
 class UserSchema(Schema):

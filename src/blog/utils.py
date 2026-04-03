@@ -4,7 +4,8 @@ Utility functions for blog operations.
 from django.db.models import Q
 from django.utils import timezone
 from django.utils.text import slugify
-from .models import BlogPost, Category
+from django.conf import settings
+from .models import BlogPost, Category, Comment
 from typing import Optional
 
 
@@ -104,6 +105,56 @@ def get_published_posts(limit: Optional[int] = None, category: Optional[str] = N
         queryset = queryset[:limit]
 
     return queryset
+
+
+def _author_dict(user):
+    """Build a comment author dict including avatar_url."""
+    try:
+        avatar_url = f"{settings.MEDIA_URL}{user.profile.avatar.name}" if user.profile.avatar else None
+    except Exception:
+        avatar_url = None
+    return {'id': user.id, 'username': user.username, 'avatar_url': avatar_url}
+
+
+def _comment_to_dict(c):
+    """Serialize a single Comment instance (no replies) to a dict."""
+    return {
+        'id': c.id,
+        'author': _author_dict(c.author) if not c.is_deleted else None,
+        'content_json': c.content_json if not c.is_deleted else None,
+        'is_deleted': c.is_deleted,
+        'created_at': c.created_at,
+        'updated_at': c.updated_at,
+        'replies': [],
+    }
+
+
+def build_comment_tree(queryset):
+    """
+    Build a nested comment tree from a pre-filtered queryset.
+    Returns a list of dicts matching the CommentOut schema.
+    """
+    all_comments = queryset.select_related('author', 'author__profile').order_by('created_at')
+    comment_map = {}
+    roots = []
+    for c in all_comments:
+        node = {
+            'id': c.id,
+            'author': _author_dict(c.author) if not c.is_deleted else None,
+            'content_json': c.content_json if not c.is_deleted else None,
+            'is_deleted': c.is_deleted,
+            'created_at': c.created_at,
+            'updated_at': c.updated_at,
+            'replies': [],
+        }
+        comment_map[c.id] = node
+        if c.parent_id is None:
+            roots.append(node)
+        else:
+            parent_node = comment_map.get(c.parent_id)
+            if parent_node:
+                parent_node['replies'].append(node)
+    return roots
 
 
 def get_user_posts(user, include_drafts=True):

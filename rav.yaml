@@ -13,6 +13,17 @@ scripts:
     curl -X GET -H "Authorization: Bearer <curl_auth-access-token>" http://127.0.0.1:8001/api/me
   test:
     - cd src && python manage.py test
-
-  
-  
+  seed:
+    - cd src && python manage.py seed_db
+  seed_reset:
+    - cd src && python manage.py seed_db --reset
+  createsuperuser:
+    - cd src && python manage.py createsuperuser
+  showmigrations:
+    - cd src && python manage.py showmigrations
+  dbshell:
+    - cd src && python manage.py dbshell
+  flushexpiredtokens:
+    - cd src && python manage.py flushexpiredtokens
+  flush:
+    - cd src && python manage.py flush

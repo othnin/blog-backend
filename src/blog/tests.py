@@ -45,13 +45,14 @@ def make_user(username, email, password='ValidPass123', role='reader', email_ver
     return user
 
 
-def make_post(title, author, status='draft', slug=None):
+def make_post(title, author, status='draft', slug=None, **kwargs):
     """Create a BlogPost with minimal required fields."""
     if slug is None:
         slug = title.lower().replace(' ', '-').replace("'", '')
     return BlogPost.objects.create(
         title=title, slug=slug,
         author=author, content_json=LEXICAL_JSON, status=status,
+        **kwargs,
     )
 
 
@@ -163,13 +164,13 @@ class BlogPostListTests(TestCase):
         self.assertNotIn('Draft Post', titles)
         self.assertNotIn('Archived Post', titles)
 
-    def test_list_includes_author_and_categories(self):
+    def test_list_includes_author_and_category(self):
         response = self.client.get('/api/blog/posts/')
         data = json.loads(response.content)
         self.assertTrue(len(data) > 0)
         post = data[0]
         self.assertIn('author', post)
-        self.assertIn('categories', post)
+        self.assertIn('category', post)
 
     def test_list_limit_parameter(self):
         for i in range(5):
@@ -303,14 +304,14 @@ class BlogPostCreateTests(TestCase):
         response = self._post(data, self.editor)
         self.assertNotEqual(response.status_code, 200)
 
-    def test_create_with_categories(self):
+    def test_create_with_category(self):
         cat = Category.objects.create(name='Tech', slug='tech')
-        data = {**self.valid_data, 'category_ids': [cat.id]}
+        data = {**self.valid_data, 'category_id': cat.id}
         response = self._post(data, self.editor)
         self.assertEqual(response.status_code, 200)
         result = json.loads(response.content)
-        self.assertEqual(len(result['categories']), 1)
-        self.assertEqual(result['categories'][0]['slug'], 'tech')
+        self.assertIsNotNone(result['category'])
+        self.assertEqual(result['category']['slug'], 'tech')
 
     def test_duplicate_title_gets_unique_slug(self):
         self._post(self.valid_data, self.editor)
@@ -379,13 +380,13 @@ class BlogPostUpdateTests(TestCase):
         response = self._put({'title': 'Ghost'}, self.admin, post_id=99999)
         self.assertNotEqual(response.status_code, 200)
 
-    def test_update_categories(self):
+    def test_update_category(self):
         cat = Category.objects.create(name='NewCat', slug='newcat')
-        response = self._put({'category_ids': [cat.id]}, self.editor)
+        response = self._put({'category_id': cat.id}, self.editor)
         self.assertEqual(response.status_code, 200)
         result = json.loads(response.content)
-        self.assertEqual(len(result['categories']), 1)
-        self.assertEqual(result['categories'][0]['slug'], 'newcat')
+        self.assertIsNotNone(result['category'])
+        self.assertEqual(result['category']['slug'], 'newcat')
 
     def test_update_content_json(self):
         new_content = json.dumps({"root": {"type": "root", "children": []}})
@@ -766,11 +767,10 @@ class BlogModelTests(TestCase):
         post = BlogPost(content_json='not valid json {{')
         self.assertEqual(post.get_content_dict(), {})
 
-    def test_category_m2m_relationship(self):
-        cat = Category.objects.create(name='M2M Test', slug='m2m-test')
-        post = make_post('M2M Post', self.editor, slug='m2m-post')
-        post.categories.add(cat)
-        self.assertIn(cat, post.categories.all())
+    def test_category_fk_relationship(self):
+        cat = Category.objects.create(name='FK Test', slug='fk-test')
+        post = make_post('FK Post', self.editor, slug='fk-post', category=cat)
+        self.assertEqual(post.category, cat)
         self.assertIn(post, cat.blog_posts.all())
 
     def test_blogpost_str(self):
