@@ -166,6 +166,7 @@ class RecipeController:
             cuisine_type=payload.cuisine_type,
             course=payload.course,
             status=payload.status,
+            comments_disabled=payload.comments_disabled,
         )
 
         if payload.dietary_label_ids:
@@ -259,6 +260,8 @@ class RecipeController:
         recipe = get_object_or_404(Recipe, id=recipe_id)
         if recipe.status != 'published':
             raise HttpError(403, "Comments are only allowed on published recipes")
+        if recipe.comments_disabled:
+            raise HttpError(403, "Comments are disabled on this recipe")
         parent = None
         if payload.parent_id is not None:
             parent = get_object_or_404(Comment, id=payload.parent_id, recipe=recipe)
@@ -367,6 +370,8 @@ class RecipeDetailController:
             recipe.course = payload.course
         if payload.status is not None:
             recipe.status = payload.status
+        if payload.comments_disabled is not None:
+            recipe.comments_disabled = payload.comments_disabled
 
         recipe.save()
 

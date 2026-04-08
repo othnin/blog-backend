@@ -163,6 +163,10 @@ class BlogPost(models.Model):
         default=0,
         help_text='Number of times this blog post has been viewed'
     )
+    comments_disabled = models.BooleanField(
+        default=False,
+        help_text='When enabled, new comments cannot be posted on this blog post'
+    )
     like_count = models.PositiveIntegerField(
         default=0,
         help_text='Number of likes this blog post has received'

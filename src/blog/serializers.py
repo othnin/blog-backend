@@ -94,6 +94,7 @@ class BlogPostCreateIn(BaseModel):
     category_id: Optional[int] = None
     tag_ids: Optional[List[int]] = None
     status: str = Field(default='draft')
+    comments_disabled: bool = False
 
     @field_validator('status')
     @classmethod
@@ -120,6 +121,7 @@ class BlogPostUpdateIn(BaseModel):
     category_id: Optional[int] = None
     tag_ids: Optional[List[int]] = None
     status: Optional[str] = None
+    comments_disabled: Optional[bool] = None
 
     @field_validator('status')
     @classmethod
@@ -177,6 +179,7 @@ class BlogPostOut(BaseModel):
     status: str
     view_count: int
     like_count: int
+    comments_disabled: bool = False
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime

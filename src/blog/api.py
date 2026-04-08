@@ -224,6 +224,7 @@ class BlogController:
             status=payload.status,
             author=user,
             category=category,
+            comments_disabled=payload.comments_disabled,
         )
 
         if payload.tag_ids:
@@ -266,6 +267,9 @@ class BlogController:
 
         if payload.status:
             blog_post.status = payload.status
+
+        if payload.comments_disabled is not None:
+            blog_post.comments_disabled = payload.comments_disabled
 
         blog_post.category = get_object_or_404(Category, id=payload.category_id) if payload.category_id else None
 
@@ -408,6 +412,8 @@ class CommentController:
         post = get_object_or_404(BlogPost, id=post_id)
         if post.status != 'published':
             raise HttpError(403, "Comments are only allowed on published posts")
+        if post.comments_disabled:
+            raise HttpError(403, "Comments are disabled on this post")
         parent = None
         if payload.parent_id is not None:
             parent = get_object_or_404(Comment, id=payload.parent_id, post=post)

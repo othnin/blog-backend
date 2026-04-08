@@ -90,6 +90,7 @@ class RecipeCreateIn(BaseModel):
     dietary_label_ids: List[int] = []
     tag_ids: List[int] = []
     status: str = Field(default='draft')
+    comments_disabled: bool = False
 
     @field_validator('status')
     @classmethod
@@ -116,6 +117,7 @@ class RecipeUpdateIn(BaseModel):
     dietary_label_ids: Optional[List[int]] = None
     tag_ids: Optional[List[int]] = None
     status: Optional[str] = None
+    comments_disabled: Optional[bool] = None
 
     @field_validator('status')
     @classmethod
@@ -135,6 +137,7 @@ class RecipeListOut(BaseModel):
     slug: str
     status: str
     view_count: int
+    comments_disabled: bool = False
     published_at: Optional[datetime] = None
     created_at: datetime
     author: RecipeAuthorOut

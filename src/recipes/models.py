@@ -106,6 +106,11 @@ class Recipe(models.Model):
     )
     published_at = models.DateTimeField(null=True, blank=True, db_index=True)
 
+    comments_disabled = models.BooleanField(
+        default=False,
+        help_text='When enabled, new comments cannot be posted on this recipe'
+    )
+
     # Analytics
     view_count = models.PositiveIntegerField(default=0)
 
