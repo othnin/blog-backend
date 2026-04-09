@@ -13,6 +13,7 @@ from django.utils.text import slugify
 from django.conf import settings
 from typing import List, Optional
 from .models import BlogPost, Category, Comment, Tag
+from helpers.rate_limit import check_rate_limit
 from ninja import File
 from ninja.files import UploadedFile
 import uuid, os
@@ -409,6 +410,14 @@ class CommentController:
     )
     def create_comment(self, post_id: int, payload: CommentIn) -> CommentOut:
         """Create a top-level comment or a reply. Any authenticated user can comment."""
+        # Rate limit: 5 comments per hour per user
+        check_rate_limit(
+            self.context.request,
+            key="blog_comment",
+            max_requests=5,
+            period=3600,
+            identifier=str(self.context.request.user.id),
+        )
         post = get_object_or_404(BlogPost, id=post_id)
         if post.status != 'published':
             raise HttpError(403, "Comments are only allowed on published posts")

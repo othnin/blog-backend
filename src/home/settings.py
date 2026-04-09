@@ -197,3 +197,22 @@ FRONTEND_URL = config("FRONTEND_URL", cast=str, default="http://localhost:3000")
 # Auth settings
 # In development, skip email verification to make testing easier
 SKIP_EMAIL_VERIFICATION = config("SKIP_EMAIL_VERIFICATION", cast=bool, default=config("DJANGO_DEBUG", cast=bool, default=False))
+
+# Cache — LocMemCache for development; set CACHE_URL=redis://... for production
+CACHE_URL = config("CACHE_URL", cast=str, default="")
+if CACHE_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": CACHE_URL,
+        }
+    }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+        }
+    }
+
+# Rate limiting — disabled by default in DEBUG mode (development/tests); enabled in production
+RATE_LIMIT_ENABLED = config("RATE_LIMIT_ENABLED", cast=bool, default=not DEBUG)

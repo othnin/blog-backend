@@ -1,4 +1,5 @@
 import helpers
+from helpers.rate_limit import check_rate_limit
 from ninja import NinjaAPI, Schema, Router
 from pydantic import ValidationError as PydanticValidationError
 from typing import Optional
@@ -56,6 +57,9 @@ def obtain_token_pair(request, data: LoginSerializer):
     Requires email verification.
     Accepts either username or email for login.
     """
+    # Rate limit: 5 login attempts per 10 minutes per IP
+    check_rate_limit(request, key="login", max_requests=5, period=600)
+
     # Try to authenticate with username first
     user = authenticate(username=data.username, password=data.password)
 

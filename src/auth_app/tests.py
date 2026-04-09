@@ -1,7 +1,7 @@
 """
 Unit tests for authentication endpoints and functionality.
 """
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.urls import reverse
@@ -1880,3 +1880,124 @@ class AuthChangePasswordTests(TestCase):
             content_type='application/json'
         )
         self.assertEqual(login_response.status_code, 401)
+
+
+# ---------------------------------------------------------------------------
+# Rate Limiting Tests
+# ---------------------------------------------------------------------------
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class LoginRateLimitTests(TestCase):
+    """Tests for rate limiting on POST /api/token/pair (5 per 10 min per IP)."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+        self.url = '/api/token/pair'
+        # A real verified user so some requests can succeed
+        self.user = User.objects.create_user(
+            username='rl_user', email='rl@example.com', password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _post(self, ip='10.0.0.1', username='rl_user', password='ValidPass123'):
+        return self.client.post(
+            self.url,
+            data=json.dumps({'username': username, 'password': password}),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_first_five_attempts_are_allowed(self):
+        """First 5 requests from same IP are not rate-limited."""
+        for _ in range(5):
+            r = self._post()
+            self.assertNotEqual(r.status_code, 429)
+
+    def test_sixth_attempt_is_blocked(self):
+        """6th request from same IP within window returns 429."""
+        for _ in range(5):
+            self._post()
+        r = self._post()
+        self.assertEqual(r.status_code, 429)
+
+    def test_429_response_contains_retry_message(self):
+        """Rate-limited response includes a retry message."""
+        for _ in range(5):
+            self._post()
+        r = self._post()
+        body = json.loads(r.content)
+        self.assertIn('detail', body)
+        self.assertIn('seconds', body['detail'])
+
+    def test_different_ips_have_independent_buckets(self):
+        """Exhausting the limit for one IP does not affect another IP."""
+        for _ in range(5):
+            self._post(ip='10.0.0.1')
+        # IP 10.0.0.1 is now blocked
+        self.assertEqual(self._post(ip='10.0.0.1').status_code, 429)
+        # IP 10.0.0.2 should still be allowed
+        self.assertNotEqual(self._post(ip='10.0.0.2').status_code, 429)
+
+    def test_x_forwarded_for_is_used_as_identifier(self):
+        """X-Forwarded-For header is respected for IP detection."""
+        for _ in range(5):
+            self.client.post(
+                self.url,
+                data=json.dumps({'username': 'rl_user', 'password': 'ValidPass123'}),
+                content_type='application/json',
+                HTTP_X_FORWARDED_FOR='5.5.5.5',
+            )
+        r = self.client.post(
+            self.url,
+            data=json.dumps({'username': 'rl_user', 'password': 'ValidPass123'}),
+            content_type='application/json',
+            HTTP_X_FORWARDED_FOR='5.5.5.5',
+        )
+        self.assertEqual(r.status_code, 429)
+
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class RegisterRateLimitTests(TestCase):
+    """Tests for rate limiting on POST /api/auth/register (3 per day per IP)."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+        self.url = '/api/auth/register'
+
+    def _post(self, suffix, ip='10.1.0.1'):
+        return self.client.post(
+            self.url,
+            data=json.dumps({
+                'email': f'newuser{suffix}@example.com',
+                'password': 'ValidPass123',
+                'password_confirm': 'ValidPass123',
+                'username': f'newuser{suffix}',
+            }),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_first_three_registrations_are_allowed(self):
+        """First 3 requests from same IP are not rate-limited."""
+        for i in range(3):
+            r = self._post(i)
+            self.assertNotEqual(r.status_code, 429)
+
+    def test_fourth_registration_is_blocked(self):
+        """4th registration attempt from same IP returns 429."""
+        for i in range(3):
+            self._post(i)
+        r = self._post(99)
+        self.assertEqual(r.status_code, 429)
+
+    def test_different_ips_have_independent_buckets(self):
+        """Exhausting the registration limit on one IP does not block another."""
+        for i in range(3):
+            self._post(i, ip='10.1.0.1')
+        self.assertEqual(self._post(99, ip='10.1.0.1').status_code, 429)
+        self.assertNotEqual(self._post(100, ip='10.1.0.2').status_code, 429)

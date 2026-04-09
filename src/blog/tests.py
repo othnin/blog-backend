@@ -7,11 +7,11 @@ via HTTP_AUTHORIZATION on every request using the JWTClient helper.
 Unauthenticated requests return 401 (JWTAuth rejects before any permission check).
 Authenticated-but-unauthorised requests return 403 (IsEditorOrAdmin permission).
 """
-from django.test import TestCase, Client
+from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
 import json
 
-from blog.models import BlogPost, Category, Comment
+from blog.models import BlogPost, Category, Comment, Tag
 from blog.utils import create_unique_slug, can_edit_post, can_delete_post
 
 
@@ -1019,3 +1019,358 @@ class ImageUploadTests(TestCase):
         )
         # Should fail (either 400 or 422)
         self.assertNotEqual(response.status_code, 200)
+
+# ---------------------------------------------------------------------------
+# Tag Management Tests  (BLOG-011)
+# ---------------------------------------------------------------------------
+
+class TagListTests(TestCase):
+    """Tests for GET /api/blog/tags/"""
+
+    def setUp(self):
+        self.url = '/api/blog/tags/'
+        self.t1 = Tag.objects.create(name='Python')
+        self.t2 = Tag.objects.create(name='Django')
+        self.t3 = Tag.objects.create(name='Nextjs')
+
+    def test_list_tags_is_public(self):
+        response = Client().get(self.url)
+        self.assertEqual(response.status_code, 200)
+
+    def test_list_tags_returns_all_tags(self):
+        data = json.loads(Client().get(self.url).content)
+        self.assertEqual(len(data), 3)
+
+    def test_list_tags_ordered_by_name(self):
+        data = json.loads(Client().get(self.url).content)
+        names = [t['name'] for t in data]
+        self.assertEqual(names, sorted(names))
+
+    def test_list_tags_response_shape(self):
+        data = json.loads(Client().get(self.url).content)
+        tag = data[0]
+        for field in ('id', 'name', 'slug', 'meta_description'):
+            self.assertIn(field, tag)
+
+
+class TagCreateTests(TestCase):
+    """Tests for POST /api/blog/tags/"""
+
+    def setUp(self):
+        self.url = '/api/blog/tags/'
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.admin  = make_user('admin',  'admin@example.com',  role='admin')
+        self.reader = make_user('reader', 'reader@example.com', role='reader')
+
+    def _post(self, data, user=None):
+        client = jwt_client(user) if user else Client()
+        return client.post(self.url, data=json.dumps(data), content_type='application/json')
+
+    def test_unauthenticated_gets_401(self):
+        self.assertEqual(self._post({'name': 'Tag'}).status_code, 401)
+
+    def test_reader_gets_403(self):
+        self.assertEqual(self._post({'name': 'Tag'}, self.reader).status_code, 403)
+
+    def test_editor_can_create_tag(self):
+        response = self._post({'name': 'Python'}, self.editor)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertEqual(data['name'], 'Python')
+        self.assertEqual(data['slug'], 'python')
+
+    def test_admin_can_create_tag(self):
+        response = self._post({'name': 'Django'}, self.admin)
+        self.assertEqual(response.status_code, 200)
+
+    def test_create_tag_auto_slugifies_name(self):
+        response = self._post({'name': 'Hello World'}, self.editor)
+        data = json.loads(response.content)
+        self.assertEqual(data['slug'], 'hello-world')
+
+    def test_create_tag_returns_existing_on_slug_collision(self):
+        existing = Tag.objects.create(name='Python', slug='python')
+        response = self._post({'name': 'Python'}, self.editor)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertEqual(data['id'], existing.id)
+
+    def test_create_tag_empty_name_rejected(self):
+        response = self._post({'name': ''}, self.editor)
+        self.assertNotEqual(response.status_code, 200)
+
+
+class TagUpdateTests(TestCase):
+    """Tests for PUT /api/blog/tags/{tag_id}/"""
+
+    def setUp(self):
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.admin  = make_user('admin',  'admin@example.com',  role='admin')
+        self.reader = make_user('reader', 'reader@example.com', role='reader')
+        self.tag = Tag.objects.create(name='Original', slug='original')
+        self.url = f'/api/blog/tags/{self.tag.id}/'
+
+    def _put(self, data, user=None):
+        client = jwt_client(user) if user else Client()
+        return client.put(self.url, data=json.dumps(data), content_type='application/json')
+
+    def test_unauthenticated_gets_401(self):
+        self.assertEqual(self._put({'name': 'New'}).status_code, 401)
+
+    def test_reader_gets_403(self):
+        self.assertEqual(self._put({'name': 'New'}, self.reader).status_code, 403)
+
+    def test_editor_can_update_tag_name(self):
+        response = self._put({'name': 'Updated'}, self.editor)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertEqual(data['name'], 'Updated')
+        self.assertEqual(data['slug'], 'updated')
+
+    def test_admin_can_update_tag(self):
+        response = self._put({'name': 'By Admin'}, self.admin)
+        self.assertEqual(response.status_code, 200)
+
+    def test_update_meta_description(self):
+        response = self._put({'meta_description': 'Posts about Python'}, self.editor)
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertEqual(data['meta_description'], 'Posts about Python')
+
+    def test_update_nonexistent_tag_returns_404(self):
+        url = '/api/blog/tags/99999/'
+        response = jwt_client(self.editor).put(url, data=json.dumps({'name': 'X'}), content_type='application/json')
+        self.assertEqual(response.status_code, 404)
+
+
+class TagDeleteTests(TestCase):
+    """Tests for DELETE /api/blog/tags/{tag_id}/"""
+
+    def setUp(self):
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.admin  = make_user('admin',  'admin@example.com',  role='admin')
+        self.reader = make_user('reader', 'reader@example.com', role='reader')
+        self.tag = Tag.objects.create(name='ToDelete', slug='to-delete')
+        self.url = f'/api/blog/tags/{self.tag.id}/'
+
+    def test_unauthenticated_gets_401(self):
+        response = Client().delete(self.url)
+        self.assertEqual(response.status_code, 401)
+
+    def test_reader_gets_403(self):
+        response = jwt_client(self.reader).delete(self.url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_editor_gets_403(self):
+        response = jwt_client(self.editor).delete(self.url)
+        self.assertEqual(response.status_code, 403)
+
+    def test_admin_can_delete_tag(self):
+        response = jwt_client(self.admin).delete(self.url)
+        self.assertEqual(response.status_code, 200)
+        self.assertFalse(Tag.objects.filter(id=self.tag.id).exists())
+
+    def test_delete_nonexistent_tag_returns_404(self):
+        response = jwt_client(self.admin).delete('/api/blog/tags/99999/')
+        self.assertEqual(response.status_code, 404)
+
+
+class TagPostAssociationTests(TestCase):
+    """Tests for tag_ids on post create/update and tag filtering on list."""
+
+    def setUp(self):
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.t1 = Tag.objects.create(name='Python', slug='python')
+        self.t2 = Tag.objects.create(name='Django', slug='django')
+        self.posts_url = '/api/blog/posts/'
+
+    def _post(self, data):
+        return jwt_client(self.editor).post(
+            self.posts_url, data=json.dumps(data), content_type='application/json'
+        )
+
+    def test_create_post_with_tags(self):
+        response = self._post({
+            'title': 'Tagged Post',
+            'content_json': LEXICAL_JSON,
+            'tag_ids': [self.t1.id, self.t2.id],
+        })
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        tag_ids = [t['id'] for t in data['tags']]
+        self.assertIn(self.t1.id, tag_ids)
+        self.assertIn(self.t2.id, tag_ids)
+
+    def test_update_post_replaces_tags(self):
+        post = make_post('Tag Post', self.editor, slug='tag-post')
+        post.tags.set([self.t1])
+        response = jwt_client(self.editor).put(
+            f'{self.posts_url}{post.id}/',
+            data=json.dumps({'tag_ids': [self.t2.id]}),
+            content_type='application/json',
+        )
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        tag_slugs = [t['slug'] for t in data['tags']]
+        self.assertEqual(tag_slugs, ['django'])
+
+    def test_filter_published_posts_by_tag(self):
+        p1 = make_post('P1', self.editor, status='published', slug='p1')
+        p1.tags.add(self.t1)
+        p2 = make_post('P2', self.editor, status='published', slug='p2')
+        p2.tags.add(self.t2)
+
+        response = Client().get(self.posts_url, {'tags': 'python'})
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        slugs = [p['slug'] for p in data]
+        self.assertIn('p1', slugs)
+        self.assertNotIn('p2', slugs)
+
+    def test_filter_by_tag_and_logic(self):
+        """Posts must have ALL requested tags to match."""
+        p_both = make_post('Both', self.editor, status='published', slug='both')
+        p_both.tags.set([self.t1, self.t2])
+        p_one = make_post('One', self.editor, status='published', slug='one')
+        p_one.tags.add(self.t1)
+
+        response = Client().get(self.posts_url, {'tags': 'python,django'})
+        data = json.loads(response.content)
+        slugs = [p['slug'] for p in data]
+        self.assertIn('both', slugs)
+        self.assertNotIn('one', slugs)
+
+    def test_tag_model_auto_slugifies(self):
+        tag = Tag.objects.create(name='Hello World')
+        self.assertEqual(tag.slug, 'hello-world')
+
+    def test_tag_str(self):
+        tag = Tag(name='Python')
+        self.assertEqual(str(tag), 'Python')
+
+
+# ---------------------------------------------------------------------------
+# Post Like Tests  (BLOG-012)
+# ---------------------------------------------------------------------------
+
+class PostLikeTests(TestCase):
+    """Tests for POST /api/blog/posts/{slug}/like/"""
+
+    def setUp(self):
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.reader = make_user('reader', 'reader@example.com', role='reader')
+        self.published = make_post('Published', self.editor, status='published', slug='published-post')
+        self.draft     = make_post('Draft',     self.editor, status='draft',     slug='draft-post')
+        self.archived  = make_post('Archived',  self.editor, status='archived',  slug='archived-post')
+
+    def _like(self, slug, user=None):
+        client = jwt_client(user) if user else Client()
+        return client.post(f'/api/blog/posts/{slug}/like/')
+
+    def test_like_published_post_is_public(self):
+        response = self._like('published-post')
+        self.assertEqual(response.status_code, 200)
+
+    def test_like_returns_like_count(self):
+        data = json.loads(self._like('published-post').content)
+        self.assertIn('like_count', data)
+
+    def test_like_increments_count_from_zero(self):
+        self.assertEqual(self.published.like_count, 0)
+        data = json.loads(self._like('published-post').content)
+        self.assertEqual(data['like_count'], 1)
+
+    def test_like_increments_each_call(self):
+        self._like('published-post')
+        self._like('published-post')
+        data = json.loads(self._like('published-post').content)
+        self.assertEqual(data['like_count'], 3)
+
+    def test_like_authenticated_user_also_works(self):
+        response = self._like('published-post', self.reader)
+        self.assertEqual(response.status_code, 200)
+
+    def test_like_draft_returns_404(self):
+        self.assertEqual(self._like('draft-post').status_code, 404)
+
+    def test_like_archived_returns_404(self):
+        self.assertEqual(self._like('archived-post').status_code, 404)
+
+    def test_like_nonexistent_slug_returns_404(self):
+        self.assertEqual(self._like('does-not-exist').status_code, 404)
+
+    def test_like_count_model_method(self):
+        self.published.increment_like_count()
+        self.published.refresh_from_db()
+        self.assertEqual(self.published.like_count, 1)
+
+    def test_like_count_default_zero(self):
+        post = make_post('Zero Likes', self.editor, slug='zero-likes')
+        self.assertEqual(post.like_count, 0)
+
+
+# ---------------------------------------------------------------------------
+# Rate Limiting Tests
+# ---------------------------------------------------------------------------
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class BlogCommentRateLimitTests(TestCase):
+    """Tests for rate limiting on blog comment creation (5 per hour per user)."""
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.editor = make_user('rl_editor', 'rl_editor@example.com', role='editor')
+        self.reader = make_user('rl_reader', 'rl_reader@example.com', role='reader')
+        self.reader2 = make_user('rl_reader2', 'rl_reader2@example.com', role='reader')
+        self.post = make_post('RL Post', self.editor, status='published', slug='rl-post')
+        self.editor_client = jwt_client(self.editor)
+        self.reader_client = jwt_client(self.reader)
+        self.reader2_client = jwt_client(self.reader2)
+        self.url = f'/api/blog/posts/{self.post.id}/comments/'
+
+    def _comment(self, client, content='hello'):
+        return client.post(
+            self.url,
+            data=json.dumps({'content_json': LEXICAL_JSON}),
+            content_type='application/json',
+        )
+
+    def test_first_five_comments_are_allowed(self):
+        """First 5 comments from the same user are not rate-limited."""
+        for _ in range(5):
+            r = self._comment(self.reader_client)
+            self.assertNotEqual(r.status_code, 429)
+
+    def test_sixth_comment_is_blocked(self):
+        """6th comment from the same user within 1 hour returns 429."""
+        for _ in range(5):
+            self._comment(self.reader_client)
+        r = self._comment(self.reader_client)
+        self.assertEqual(r.status_code, 429)
+
+    def test_429_response_contains_retry_message(self):
+        """Rate-limited comment response includes a human-readable retry message."""
+        for _ in range(5):
+            self._comment(self.reader_client)
+        r = self._comment(self.reader_client)
+        body = json.loads(r.content)
+        self.assertIn('detail', body)
+        self.assertIn('seconds', body['detail'])
+
+    def test_different_users_have_independent_buckets(self):
+        """Exhausting one user's comment quota does not affect another user."""
+        for _ in range(5):
+            self._comment(self.reader_client)
+        self.assertEqual(self._comment(self.reader_client).status_code, 429)
+        self.assertNotEqual(self._comment(self.reader2_client).status_code, 429)
+
+    def test_rate_limit_is_per_user_not_per_ip(self):
+        """Comment rate limit tracks user ID, not IP address."""
+        # reader exhausts their limit
+        for _ in range(5):
+            self._comment(self.reader_client)
+        self.assertEqual(self._comment(self.reader_client).status_code, 429)
+        # reader2 (different user, likely same IP in tests) is unaffected
+        r = self._comment(self.reader2_client)
+        self.assertNotEqual(r.status_code, 429)

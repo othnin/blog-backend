@@ -18,6 +18,7 @@ from ninja_jwt.authentication import JWTAuth
 from blog.permissions import IsEditorOrAdmin
 from blog.models import Comment, Tag
 from blog.utils import build_comment_tree, _comment_to_dict
+from helpers.rate_limit import check_rate_limit
 from blog.serializers import CommentIn, CommentUpdateIn, CommentOut
 from django.shortcuts import get_object_or_404
 from django.db.models import Avg, Count
@@ -257,6 +258,14 @@ class RecipeController:
         description="Post a comment on a recipe",
     )
     def create_comment(self, recipe_id: int, payload: CommentIn) -> CommentOut:
+        # Rate limit: 5 comments per hour per user
+        check_rate_limit(
+            self.context.request,
+            key="recipe_comment",
+            max_requests=5,
+            period=3600,
+            identifier=str(self.context.request.user.id),
+        )
         recipe = get_object_or_404(Recipe, id=recipe_id)
         if recipe.status != 'published':
             raise HttpError(403, "Comments are only allowed on published recipes")

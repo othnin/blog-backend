@@ -27,6 +27,7 @@ from auth_app.serializers import (
     ChangePasswordSchema,
 )
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
+from helpers.rate_limit import check_rate_limit
 from auth_app.utils import (
     create_email_verification_token,
     create_password_reset_token,
@@ -65,6 +66,9 @@ def register(request, data: RegisterSerializer):
     - Returns new user data on success
     - Returns error message on validation failure
     """
+    # Rate limit: 3 registration attempts per day per IP
+    check_rate_limit(request, key="register", max_requests=3, period=86400)
+
     try:
         # Check if user with email already exists
         if User.objects.filter(email=data.email).exists():
