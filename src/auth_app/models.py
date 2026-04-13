@@ -77,6 +77,8 @@ class UserProfile(models.Model):
     github_url = models.URLField(blank=True)
     website_url = models.URLField(blank=True)
     profile_public = models.BooleanField(default=True)
+    is_suspended = models.BooleanField(default=False, help_text='Suspended users cannot create content')
+    suspend_reason = models.TextField(blank=True, default='')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

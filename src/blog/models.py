@@ -42,6 +42,7 @@ class Category(models.Model):
     """
     name = models.CharField(max_length=100, unique=True, db_index=True)
     slug = models.SlugField(max_length=100, unique=True, db_index=True)
+    image_url = models.CharField(max_length=500, blank=True, default='', help_text='URL path to category image')
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
 

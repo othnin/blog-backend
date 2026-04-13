@@ -216,3 +216,39 @@ else:
 
 # Rate limiting — disabled by default in DEBUG mode (development/tests); enabled in production
 RATE_LIMIT_ENABLED = config("RATE_LIMIT_ENABLED", cast=bool, default=not DEBUG)
+
+# Logging — console in dev, console + rotating file in production
+_log_handlers = ['console'] if DEBUG else ['console', 'file']
+LOGGING = {
+    'version': 1,
+    'disable_existing_loggers': False,
+    'formatters': {
+        'verbose': {
+            'format': '{levelname} {asctime} {module} {message}',
+            'style': '{',
+        },
+    },
+    'handlers': {
+        'console': {
+            'class': 'logging.StreamHandler',
+            'formatter': 'verbose',
+        },
+        'file': {
+            'class': 'logging.handlers.RotatingFileHandler',
+            'filename': BASE_DIR / 'logs' / 'django.log',
+            'maxBytes': 5 * 1024 * 1024,  # 5 MB per file
+            'backupCount': 3,
+            'formatter': 'verbose',
+        },
+    },
+    'root': {
+        'handlers': _log_handlers,
+        'level': 'WARNING',
+    },
+    'loggers': {
+        'django': {'handlers': ['console'], 'level': 'ERROR', 'propagate': False},
+        'blog': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
+        'recipes': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
+        'auth_app': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
+    },
+}

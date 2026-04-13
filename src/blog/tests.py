@@ -119,15 +119,15 @@ class CategoryTests(TestCase):
         with self.assertRaises(Exception):
             Category.objects.create(name='Duplicate', slug='technology')
 
-    def test_editor_can_create_category(self):
+    def test_editor_cannot_create_category_via_public_endpoint(self):
+        """Category creation on the public endpoint is admin-only; editors use /api/admin/categories/."""
         client = jwt_client(self.editor)
         response = client.post(
             '/api/blog/categories/',
             data=json.dumps({'name': 'New Category'}),
             content_type='application/json',
         )
-        self.assertEqual(response.status_code, 200)
-        self.assertEqual(json.loads(response.content)['name'], 'New Category')
+        self.assertEqual(response.status_code, 403)
 
     def test_unauthenticated_cannot_create_category(self):
         response = self.client.post(
@@ -1374,3 +1374,557 @@ class BlogCommentRateLimitTests(TestCase):
         # reader2 (different user, likely same IP in tests) is unaffected
         r = self._comment(self.reader2_client)
         self.assertNotEqual(r.status_code, 429)
+
+
+# ---------------------------------------------------------------------------
+# Admin API Tests
+# ---------------------------------------------------------------------------
+
+class AdminDashboardTests(TestCase):
+    """Tests for GET /api/admin/dashboard/"""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.reader = make_user('reader_user', 'reader@example.com', role='reader')
+        cat = Category.objects.create(name='Tech', slug='tech')
+        make_post('Post 1', self.editor, status='published', category=cat)
+        make_post('Post 2', self.editor, status='draft')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_admin_can_access_dashboard(self):
+        r = self.admin_client.get('/api/admin/dashboard/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_dashboard_returns_expected_fields(self):
+        r = self.admin_client.get('/api/admin/dashboard/')
+        data = json.loads(r.content)
+        for field in ['total_users', 'total_posts', 'published_posts', 'draft_posts',
+                      'total_likes', 'total_views', 'total_categories', 'total_comments']:
+            self.assertIn(field, data)
+
+    def test_dashboard_counts_are_accurate(self):
+        r = self.admin_client.get('/api/admin/dashboard/')
+        data = json.loads(r.content)
+        self.assertEqual(data['total_users'], 3)
+        self.assertEqual(data['total_posts'], 2)
+        self.assertEqual(data['published_posts'], 1)
+        self.assertEqual(data['draft_posts'], 1)
+        self.assertEqual(data['total_categories'], 1)
+
+    def test_non_admin_cannot_access_dashboard(self):
+        r = jwt_client(self.editor).get('/api/admin/dashboard/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_reader_cannot_access_dashboard(self):
+        r = jwt_client(self.reader).get('/api/admin/dashboard/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_unauthenticated_cannot_access_dashboard(self):
+        r = Client().get('/api/admin/dashboard/')
+        self.assertEqual(r.status_code, 401)
+
+
+class AdminUserManagementTests(TestCase):
+    """Tests for /api/admin/users/ endpoints."""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.reader = make_user('reader_user', 'reader@example.com', role='reader')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_list_users(self):
+        r = self.admin_client.get('/api/admin/users/')
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 3)
+
+    def test_list_users_includes_profile(self):
+        r = self.admin_client.get('/api/admin/users/')
+        data = json.loads(r.content)
+        user = next(u for u in data if u['username'] == 'admin_user')
+        self.assertIn('profile', user)
+        self.assertEqual(user['profile']['role'], 'admin')
+
+    def test_search_users_by_username(self):
+        r = self.admin_client.get('/api/admin/users/?search=editor')
+        data = json.loads(r.content)
+        self.assertTrue(all('editor' in u['username'].lower() or 'editor' in u['email'].lower() for u in data))
+
+    def test_filter_users_by_role(self):
+        r = self.admin_client.get('/api/admin/users/?role=reader')
+        data = json.loads(r.content)
+        self.assertTrue(all(u['profile']['role'] == 'reader' for u in data))
+
+    def test_get_single_user(self):
+        r = self.admin_client.get(f'/api/admin/users/{self.reader.id}/')
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(data['username'], 'reader_user')
+
+    def test_get_nonexistent_user_returns_404(self):
+        r = self.admin_client.get('/api/admin/users/99999/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_promote_user_to_editor(self):
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.reader.id}/role/',
+            data=json.dumps({'role': 'editor'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.reader.profile.refresh_from_db()
+        self.assertEqual(self.reader.profile.role, 'editor')
+
+    def test_demote_editor_to_reader(self):
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.editor.id}/role/',
+            data=json.dumps({'role': 'reader'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.editor.profile.refresh_from_db()
+        self.assertEqual(self.editor.profile.role, 'reader')
+
+    def test_admin_cannot_change_own_role(self):
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.admin.id}/role/',
+            data=json.dumps({'role': 'reader'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_invalid_role_returns_422(self):
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.reader.id}/role/',
+            data=json.dumps({'role': 'superuser'}),
+            content_type='application/json',
+        )
+        self.assertIn(r.status_code, [400, 422])
+
+    def test_suspend_user(self):
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.reader.id}/suspend/',
+            data=json.dumps({'is_suspended': True, 'suspend_reason': 'Spam'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.reader.profile.refresh_from_db()
+        self.assertTrue(self.reader.profile.is_suspended)
+        self.assertEqual(self.reader.profile.suspend_reason, 'Spam')
+
+    def test_unsuspend_user(self):
+        self.reader.profile.is_suspended = True
+        self.reader.profile.save()
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.reader.id}/suspend/',
+            data=json.dumps({'is_suspended': False}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.reader.profile.refresh_from_db()
+        self.assertFalse(self.reader.profile.is_suspended)
+
+    def test_admin_cannot_suspend_self(self):
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.admin.id}/suspend/',
+            data=json.dumps({'is_suspended': True}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_delete_user(self):
+        r = self.admin_client.delete(f'/api/admin/users/{self.reader.id}/')
+        self.assertEqual(r.status_code, 200)
+        from django.contrib.auth.models import User
+        self.assertFalse(User.objects.filter(id=self.reader.id).exists())
+
+    def test_admin_cannot_delete_self(self):
+        r = self.admin_client.delete(f'/api/admin/users/{self.admin.id}/')
+        self.assertEqual(r.status_code, 400)
+
+    def test_non_admin_cannot_list_users(self):
+        r = jwt_client(self.editor).get('/api/admin/users/')
+        self.assertEqual(r.status_code, 403)
+
+
+class AdminPostModerationTests(TestCase):
+    """Tests for /api/admin/posts/ endpoints."""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.cat = Category.objects.create(name='Tech', slug='tech')
+        self.post1 = make_post('Published Post', self.editor, status='published', category=self.cat)
+        self.post2 = make_post('Draft Post', self.editor, status='draft')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_list_all_posts(self):
+        r = self.admin_client.get('/api/admin/posts/')
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 2)
+
+    def test_filter_posts_by_status(self):
+        r = self.admin_client.get('/api/admin/posts/?status=draft')
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['status'], 'draft')
+
+    def test_search_posts_by_title(self):
+        r = self.admin_client.get('/api/admin/posts/?search=published')
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 1)
+        self.assertIn('Published', data[0]['title'])
+
+    def test_post_list_includes_author(self):
+        r = self.admin_client.get('/api/admin/posts/')
+        data = json.loads(r.content)
+        self.assertTrue(all('author_username' in p for p in data))
+
+    def test_change_post_status_to_archived(self):
+        r = self.admin_client.patch(
+            f'/api/admin/posts/{self.post1.id}/status/',
+            data=json.dumps({'status': 'archived'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.post1.refresh_from_db()
+        self.assertEqual(self.post1.status, 'archived')
+
+    def test_publish_draft_post(self):
+        r = self.admin_client.patch(
+            f'/api/admin/posts/{self.post2.id}/status/',
+            data=json.dumps({'status': 'published'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.post2.refresh_from_db()
+        self.assertEqual(self.post2.status, 'published')
+
+    def test_invalid_status_returns_422(self):
+        r = self.admin_client.patch(
+            f'/api/admin/posts/{self.post1.id}/status/',
+            data=json.dumps({'status': 'invalid'}),
+            content_type='application/json',
+        )
+        self.assertIn(r.status_code, [400, 422])
+
+    def test_delete_any_post(self):
+        r = self.admin_client.delete(f'/api/admin/posts/{self.post1.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(BlogPost.objects.filter(id=self.post1.id).exists())
+
+    def test_delete_nonexistent_post_returns_404(self):
+        r = self.admin_client.delete('/api/admin/posts/99999/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_non_admin_cannot_list_all_posts(self):
+        r = jwt_client(self.editor).get('/api/admin/posts/')
+        self.assertEqual(r.status_code, 403)
+
+
+class AdminCategoryManagementTests(TestCase):
+    """Tests for /api/admin/categories/ CRUD endpoints."""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.cat = Category.objects.create(name='Technology', slug='technology')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_list_categories(self):
+        r = self.admin_client.get('/api/admin/categories/')
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['name'], 'Technology')
+
+    def test_list_includes_post_count(self):
+        editor = make_user('editor2', 'e2@example.com', role='editor')
+        make_post('P1', editor, status='published', category=self.cat)
+        r = self.admin_client.get('/api/admin/categories/')
+        data = json.loads(r.content)
+        self.assertEqual(data[0]['post_count'], 1)
+
+    def test_create_category(self):
+        r = self.admin_client.post(
+            '/api/admin/categories/',
+            data=json.dumps({'name': 'Science'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(data['name'], 'Science')
+        self.assertEqual(data['slug'], 'science')
+
+    def test_create_duplicate_category_returns_400(self):
+        r = self.admin_client.post(
+            '/api/admin/categories/',
+            data=json.dumps({'name': 'Technology'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_update_category_name(self):
+        r = self.admin_client.put(
+            f'/api/admin/categories/{self.cat.id}/',
+            data=json.dumps({'name': 'Tech & Science'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.cat.refresh_from_db()
+        self.assertEqual(self.cat.name, 'Tech & Science')
+
+    def test_update_category_slug_auto_updates(self):
+        self.admin_client.put(
+            f'/api/admin/categories/{self.cat.id}/',
+            data=json.dumps({'name': 'New Name'}),
+            content_type='application/json',
+        )
+        self.cat.refresh_from_db()
+        self.assertEqual(self.cat.slug, 'new-name')
+
+    def test_update_to_existing_name_returns_400(self):
+        Category.objects.create(name='Science', slug='science')
+        r = self.admin_client.put(
+            f'/api/admin/categories/{self.cat.id}/',
+            data=json.dumps({'name': 'Science'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_delete_category(self):
+        r = self.admin_client.delete(f'/api/admin/categories/{self.cat.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(Category.objects.filter(id=self.cat.id).exists())
+
+    def test_delete_category_clears_post_category(self):
+        editor = make_user('editor2', 'e2@example.com', role='editor')
+        post = make_post('P1', editor, status='published', category=self.cat)
+        self.admin_client.delete(f'/api/admin/categories/{self.cat.id}/')
+        post.refresh_from_db()
+        self.assertIsNone(post.category_id)
+
+    def test_delete_nonexistent_category_returns_404(self):
+        r = self.admin_client.delete('/api/admin/categories/99999/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_non_admin_cannot_manage_categories(self):
+        r = jwt_client(self.editor).get('/api/admin/categories/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_category_image_url_field_in_response(self):
+        r = self.admin_client.get('/api/admin/categories/')
+        data = json.loads(r.content)
+        self.assertIn('image_url', data[0])
+
+
+class AdminRecipeTests(TestCase):
+    """Tests for /api/admin/recipes/ endpoints."""
+
+    def setUp(self):
+        from recipes.models import Recipe
+        self.Recipe = Recipe
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.admin_client = jwt_client(self.admin)
+
+        self.recipe1 = Recipe.objects.create(
+            title='Pasta Carbonara',
+            slug='pasta-carbonara',
+            author=self.editor,
+            status='published',
+            cuisine_type='italian',
+            description='Classic Italian pasta',
+        )
+        self.recipe2 = Recipe.objects.create(
+            title='Tacos',
+            slug='tacos',
+            author=self.editor,
+            status='draft',
+            cuisine_type='mexican',
+            description='Street tacos',
+        )
+
+    def test_list_all_recipes(self):
+        r = self.admin_client.get('/api/admin/recipes/')
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 2)
+
+    def test_list_includes_all_statuses(self):
+        r = self.admin_client.get('/api/admin/recipes/')
+        data = json.loads(r.content)
+        statuses = {item['status'] for item in data}
+        self.assertIn('published', statuses)
+        self.assertIn('draft', statuses)
+
+    def test_filter_by_status(self):
+        r = self.admin_client.get('/api/admin/recipes/?status=draft')
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['status'], 'draft')
+
+    def test_search_by_title(self):
+        r = self.admin_client.get('/api/admin/recipes/?search=pasta')
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 1)
+        self.assertIn('Pasta', data[0]['title'])
+
+    def test_response_includes_author_username(self):
+        r = self.admin_client.get('/api/admin/recipes/')
+        data = json.loads(r.content)
+        self.assertTrue(all('author_username' in item for item in data))
+
+    def test_change_recipe_status(self):
+        r = self.admin_client.patch(
+            f'/api/admin/recipes/{self.recipe2.id}/status/',
+            data=json.dumps({'status': 'published'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.recipe2.refresh_from_db()
+        self.assertEqual(self.recipe2.status, 'published')
+
+    def test_archive_recipe(self):
+        r = self.admin_client.patch(
+            f'/api/admin/recipes/{self.recipe1.id}/status/',
+            data=json.dumps({'status': 'archived'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.recipe1.refresh_from_db()
+        self.assertEqual(self.recipe1.status, 'archived')
+
+    def test_invalid_status_returns_422(self):
+        r = self.admin_client.patch(
+            f'/api/admin/recipes/{self.recipe1.id}/status/',
+            data=json.dumps({'status': 'scheduled'}),
+            content_type='application/json',
+        )
+        self.assertIn(r.status_code, [400, 422])
+
+    def test_delete_recipe(self):
+        r = self.admin_client.delete(f'/api/admin/recipes/{self.recipe1.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(self.Recipe.objects.filter(id=self.recipe1.id).exists())
+
+    def test_delete_nonexistent_recipe_returns_404(self):
+        r = self.admin_client.delete('/api/admin/recipes/99999/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_non_admin_cannot_access(self):
+        r = jwt_client(self.editor).get('/api/admin/recipes/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_unauthenticated_cannot_access(self):
+        r = Client().get('/api/admin/recipes/')
+        self.assertEqual(r.status_code, 401)
+
+
+class AdminTagManagementTests(TestCase):
+    """Tests for /api/admin/tags/ CRUD endpoints."""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.tag = Tag.objects.create(name='Python', slug='python', meta_description='Python programming')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_list_tags(self):
+        r = self.admin_client.get('/api/admin/tags/')
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 1)
+        self.assertEqual(data[0]['name'], 'Python')
+
+    def test_list_includes_post_count(self):
+        editor = make_user('ed2', 'ed2@example.com', role='editor')
+        post = make_post('P1', editor, status='published')
+        post.tags.add(self.tag)
+        r = self.admin_client.get('/api/admin/tags/')
+        data = json.loads(r.content)
+        self.assertEqual(data[0]['post_count'], 1)
+
+    def test_list_includes_meta_description(self):
+        r = self.admin_client.get('/api/admin/tags/')
+        data = json.loads(r.content)
+        self.assertEqual(data[0]['meta_description'], 'Python programming')
+
+    def test_create_tag(self):
+        r = self.admin_client.post(
+            '/api/admin/tags/',
+            data=json.dumps({'name': 'Django', 'meta_description': 'Django framework'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        data = json.loads(r.content)
+        self.assertEqual(data['name'], 'Django')
+        self.assertEqual(data['slug'], 'django')
+        self.assertEqual(data['meta_description'], 'Django framework')
+
+    def test_create_tag_without_meta(self):
+        r = self.admin_client.post(
+            '/api/admin/tags/',
+            data=json.dumps({'name': 'Flask'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(json.loads(r.content)['meta_description'], '')
+
+    def test_create_duplicate_tag_returns_400(self):
+        r = self.admin_client.post(
+            '/api/admin/tags/',
+            data=json.dumps({'name': 'Python'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_update_tag_name(self):
+        r = self.admin_client.put(
+            f'/api/admin/tags/{self.tag.id}/',
+            data=json.dumps({'name': 'Python 3'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.name, 'Python 3')
+        self.assertEqual(self.tag.slug, 'python-3')
+
+    def test_update_tag_meta_description(self):
+        r = self.admin_client.put(
+            f'/api/admin/tags/{self.tag.id}/',
+            data=json.dumps({'meta_description': 'Updated description'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.tag.refresh_from_db()
+        self.assertEqual(self.tag.meta_description, 'Updated description')
+
+    def test_update_to_existing_name_returns_400(self):
+        Tag.objects.create(name='JavaScript', slug='javascript')
+        r = self.admin_client.put(
+            f'/api/admin/tags/{self.tag.id}/',
+            data=json.dumps({'name': 'JavaScript'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400)
+
+    def test_delete_tag(self):
+        r = self.admin_client.delete(f'/api/admin/tags/{self.tag.id}/')
+        self.assertEqual(r.status_code, 200)
+        self.assertFalse(Tag.objects.filter(id=self.tag.id).exists())
+
+    def test_delete_nonexistent_tag_returns_404(self):
+        r = self.admin_client.delete('/api/admin/tags/99999/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_non_admin_cannot_manage_tags(self):
+        r = jwt_client(self.editor).get('/api/admin/tags/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_unauthenticated_cannot_access(self):
+        r = Client().get('/api/admin/tags/')
+        self.assertEqual(r.status_code, 401)

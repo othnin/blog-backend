@@ -285,3 +285,132 @@ class LikeOut(BaseModel):
     """Response for a like action."""
     like_count: int
 
+
+# ─── Admin serializers ────────────────────────────────────────────────────────
+
+class AdminCategoryOut(BaseModel):
+    """Category output with image_url and post count."""
+    id: int
+    name: str
+    slug: str
+    image_url: str = ''
+    post_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdminCategoryCreateIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+
+
+class AdminCategoryUpdateIn(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+
+
+class AdminUserProfileOut(BaseModel):
+    role: str
+    email_verified: bool
+    is_suspended: bool
+    suspend_reason: str = ''
+    avatar_url: Optional[str] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminUserOut(BaseModel):
+    id: int
+    username: str
+    email: str
+    first_name: str = ''
+    last_name: str = ''
+    is_active: bool
+    date_joined: datetime
+    profile: Optional[AdminUserProfileOut] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminUserRoleIn(BaseModel):
+    role: str = Field(..., pattern='^(reader|editor|admin)$')
+
+
+class AdminUserSuspendIn(BaseModel):
+    is_suspended: bool
+    suspend_reason: Optional[str] = ''
+
+
+class AdminPostListOut(BaseModel):
+    id: int
+    title: str
+    slug: str
+    status: str
+    author_username: str = ''
+    category_name: Optional[str] = None
+    view_count: int
+    like_count: int
+    created_at: datetime
+    published_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminPostStatusIn(BaseModel):
+    status: str = Field(..., pattern='^(draft|published|scheduled|archived)$')
+
+
+class AdminDashboardOut(BaseModel):
+    total_users: int
+    total_posts: int
+    published_posts: int
+    draft_posts: int
+    total_likes: int
+    total_views: int
+    total_categories: int
+    total_comments: int
+
+
+class AdminRecipeListOut(BaseModel):
+    id: int
+    title: str
+    slug: str
+    status: str
+    author_username: str = ''
+    cuisine_type: str = ''
+    view_count: int
+    created_at: datetime
+    published_at: Optional[datetime] = None
+
+    class Config:
+        from_attributes = True
+
+
+class AdminRecipeStatusIn(BaseModel):
+    status: str = Field(..., pattern='^(draft|published|archived)$')
+
+
+class AdminTagOut(BaseModel):
+    id: int
+    name: str
+    slug: str
+    meta_description: str = ''
+    post_count: int = 0
+    created_at: datetime
+
+    class Config:
+        from_attributes = True
+
+
+class AdminTagCreateIn(BaseModel):
+    name: str = Field(..., min_length=1, max_length=100)
+    meta_description: Optional[str] = ''
+
+
+class AdminTagUpdateIn(BaseModel):
+    name: Optional[str] = Field(None, min_length=1, max_length=100)
+    meta_description: Optional[str] = None
+
