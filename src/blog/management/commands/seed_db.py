@@ -9,6 +9,7 @@ Usage:
 import json
 
 from django.contrib.auth.models import User
+from django.core.management import call_command
 from django.core.management.base import BaseCommand
 
 from blog.models import BlogPost, Category, Comment, Tag
@@ -97,8 +98,6 @@ SEED_USERS = [
     {"username": "reader", "email": "reader@example.com", "password": "Reader1234!", "role": "reader"},
 ]
 
-SEED_CATEGORIES = ["Technology", "Food & Cooking", "Personal"]
-
 SEED_TAGS = ["python", "django", "nextjs", "recipe", "tutorial"]
 
 SEED_DIETARY_LABELS = ["Vegetarian", "Vegan", "Gluten-Free", "Dairy-Free"]
@@ -150,7 +149,7 @@ SEED_POSTS = [
         "title": "Draft: Ideas for Next Week",
         "slug": "draft-ideas-for-next-week",
         "status": "draft",
-        "category": "Personal",
+        "category": None,
         "tags": [],
         "content": _lexical("Work in progress — just a placeholder draft post for testing the dashboard."),
     },
@@ -350,16 +349,8 @@ class Command(BaseCommand):
         return result
 
     def _seed_categories(self):
-        self.stdout.write(self.style.MIGRATE_HEADING("Categories"))
-        result = {}
-        for name in SEED_CATEGORIES:
-            cat, created = Category.objects.get_or_create(name=name)
-            if created:
-                _ok(self, name)
-            else:
-                _skip(self, name)
-            result[name] = cat
-        return result
+        call_command('seed_categories', stdout=self.stdout, stderr=self.stderr)
+        return {cat.name: cat for cat in Category.objects.all()}
 
     def _seed_tags(self):
         self.stdout.write(self.style.MIGRATE_HEADING("Tags"))

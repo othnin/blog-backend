@@ -6,7 +6,7 @@ from ninja.errors import HttpError
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
 from ninja_extra.permissions import IsAuthenticated
 from ninja_jwt.authentication import JWTAuth
-from .permissions import IsEditorOrAdmin
+from .permissions import IsAdmin, IsEditorOrAdmin
 from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.text import slugify
@@ -66,7 +66,7 @@ class BlogController:
         "/categories/",
         response=CategoryOut,
         auth=JWTAuth(),
-        permissions=[IsAuthenticated, IsEditorOrAdmin],
+        permissions=[IsAuthenticated, IsAdmin],
         description="Create a new category"
     )
     def create_category(self, payload: CategoryCreateIn) -> CategoryOut:
