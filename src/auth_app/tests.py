@@ -2001,3 +2001,111 @@ class RegisterRateLimitTests(TestCase):
             self._post(i, ip='10.1.0.1')
         self.assertEqual(self._post(99, ip='10.1.0.1').status_code, 429)
         self.assertNotEqual(self._post(100, ip='10.1.0.2').status_code, 429)
+
+
+class ResendVerificationTests(TestCase):
+    """Tests for POST /api/auth/resend-verification."""
+
+    URL = '/api/auth/resend-verification'
+
+    def setUp(self):
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='unverifed_user', email='unverified@example.com', password='Pass1234!'
+        )
+        self.user.profile.email_verified = False
+        self.user.profile.save()
+
+    def _post(self, email, ip='1.2.3.4'):
+        return self.client.post(
+            self.URL,
+            data=json.dumps({'email': email}),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_returns_200_for_unverified_user(self):
+        r = self._post('unverified@example.com')
+        self.assertEqual(r.status_code, 200)
+
+    def test_sends_verification_email(self):
+        self._post('unverified@example.com')
+        self.assertEqual(len(mail.outbox), 1)
+
+    def test_returns_generic_success_for_unknown_email(self):
+        """Should not reveal whether the email exists."""
+        r = self._post('nobody@example.com')
+        self.assertEqual(r.status_code, 200)
+        data = r.json()
+        self.assertEqual(data['status'], 'success')
+
+    def test_no_email_sent_for_unknown_address(self):
+        self._post('nobody@example.com')
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_no_email_sent_for_already_verified_user(self):
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+        self._post('unverified@example.com')
+        self.assertEqual(len(mail.outbox), 0)
+
+    def test_old_tokens_invalidated_on_resend(self):
+        """Previous unused token should be marked used before a new one is created."""
+        old_token = create_email_verification_token(self.user)
+        self._post('unverified@example.com')
+        old_token.refresh_from_db()
+        self.assertTrue(old_token.is_used)
+
+    def test_new_token_created_on_resend(self):
+        initial_count = EmailVerificationToken.objects.filter(user=self.user).count()
+        self._post('unverified@example.com')
+        new_count = EmailVerificationToken.objects.filter(user=self.user).count()
+        self.assertGreater(new_count, initial_count)
+
+    def test_response_body_has_status_and_message(self):
+        r = self._post('unverified@example.com')
+        data = r.json()
+        self.assertIn('status', data)
+        self.assertIn('message', data)
+
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class ResendVerificationRateLimitTests(TestCase):
+    """Tests for rate limiting on POST /api/auth/resend-verification (3/hour per IP)."""
+
+    URL = '/api/auth/resend-verification'
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='rl_unverified', email='rl_unverified@example.com', password='Pass1234!'
+        )
+        self.user.profile.email_verified = False
+        self.user.profile.save()
+
+    def _post(self, ip='9.9.9.9'):
+        return self.client.post(
+            self.URL,
+            data=json.dumps({'email': 'rl_unverified@example.com'}),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_first_three_requests_allowed(self):
+        for _ in range(3):
+            r = self._post()
+            self.assertNotEqual(r.status_code, 429)
+
+    def test_fourth_request_is_rate_limited(self):
+        for _ in range(3):
+            self._post()
+        r = self._post()
+        self.assertEqual(r.status_code, 429)
+
+    def test_different_ips_are_independent(self):
+        for _ in range(3):
+            self._post(ip='9.9.9.1')
+        self.assertEqual(self._post(ip='9.9.9.1').status_code, 429)
+        self.assertNotEqual(self._post(ip='9.9.9.2').status_code, 429)

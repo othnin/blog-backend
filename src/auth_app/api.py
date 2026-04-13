@@ -333,6 +333,36 @@ def password_reset_confirm(request, data: PasswordResetConfirmSerializer):
             'message': f'Password reset failed: {str(e)}',
         }
 
+class ResendVerificationSchema(Schema):
+    email: str
+
+
+@router.post("/resend-verification", response=TokenResponseSchema)
+def resend_verification_email(request, data: ResendVerificationSchema):
+    """
+    Resend email verification link. Rate limited to 3 requests per hour per IP.
+    Always returns a generic success message to prevent email enumeration.
+    """
+    check_rate_limit(request, key="resend_verification", max_requests=3, period=3600)
+
+    try:
+        user = User.objects.select_related('profile').get(email=data.email)
+        if not user.profile.email_verified:
+            # Invalidate any existing unused tokens
+            EmailVerificationToken.objects.filter(user=user, is_used=False).update(is_used=True)
+            token = create_email_verification_token(user)
+            send_verification_email(user, token)
+    except User.DoesNotExist:
+        pass  # Don't reveal whether the email exists
+    except Exception:
+        pass  # Silently fail; generic message returned below
+
+    return {
+        'status': 'success',
+        'message': 'If that email belongs to an unverified account, a new verification link has been sent.',
+    }
+
+
 @router.get("/me", response=UserResponseSchema, auth=JWTAuth())
 def get_current_user(request):
     """
