@@ -50,7 +50,7 @@ RUN pip install gunicorn
 # RUN python manage.py collectstatic --noinput
 
 # set the Django default project name
-ARG PROJ_NAME="home"
+ARG PROJ_NAME="blog_backend"
 
 # create a bash script to run the Django project
 # this script will execute at runtime when
