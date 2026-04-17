@@ -109,6 +109,10 @@ WSGI_APPLICATION = "home.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
+# Database Configuration: DEV > PROD > SQLite fallback
+import dj_database_url
+
+# Default to SQLite
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
@@ -116,17 +120,40 @@ DATABASES = {
     }
 }
 
-DATABASE_URL = config("DATABASE_URL", cast=str, default="")
-if DATABASE_URL != "":
-    import dj_database_url
-    DATABASES = {
-        "default": dj_database_url.config(
-            default=DATABASE_URL,
-            conn_max_age=300,
-            conn_health_checks=True
-        )
-    }
+if DEBUG:
+    # Development: use DEV_DATABASE_URL if available, fall back to SQLite
+    DEV_DATABASE_URL = config("DEV_DATABASE_URL", cast=str, default="")
+    if DEV_DATABASE_URL:
+        DATABASES = {
+            "default": dj_database_url.config(
+                default=DEV_DATABASE_URL,
+                conn_max_age=300,
+                conn_health_checks=True
+            )
+        }
+else:
+    # Production: use PROD_DATABASE_URL if available, fall back to SQLite
+    PROD_DATABASE_URL = config("PROD_DATABASE_URL", cast=str, default="")
+    if PROD_DATABASE_URL:
+        DATABASES = {
+            "default": dj_database_url.config(
+                default=PROD_DATABASE_URL,
+                conn_max_age=300,
+                conn_health_checks=True
+            )
+        }
 
+print("Debug mode:", DEBUG)
+db_config = DATABASES['default']
+db_engine = db_config.get('ENGINE', 'unknown')
+db_host = db_config.get('HOST', 'local')
+db_port = db_config.get('PORT', 'N/A')
+db_name = db_config.get('NAME', 'unknown')
+print(f"Using database: {db_engine}")
+if 'sqlite' in db_engine.lower():
+    print(f"  SQLite database at: {db_name}")
+else:
+    print(f"  {db_host}:{db_port}/{db_name}")
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 
