@@ -56,7 +56,7 @@ ARG PROJ_NAME="home"
 # this script will execute at runtime when
 # the container starts and the database is available
 RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
-    printf "RUN_PORT=\"\${PORT:-8001}\"\n\n" >> ./paracord_runner.sh && \
+    printf "RUN_PORT=\"\${PORT:-8080}\"\n\n" >> ./paracord_runner.sh && \
     printf "python manage.py migrate --no-input\n" >> ./paracord_runner.sh && \
     printf "python manage.py collectstatic --noinput\n" >> ./paracord_runner.sh && \
     printf "if [ -n \"\$DJANGO_SUPERUSER_USERNAME\" ]; then\n" >> ./paracord_runner.sh && \
