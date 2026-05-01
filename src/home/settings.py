@@ -109,10 +109,9 @@ WSGI_APPLICATION = "home.wsgi.application"
 # Database
 # https://docs.djangoproject.com/en/5.0/ref/settings/#databases
 
-# Database Configuration: DEV > PROD > SQLite fallback
 import dj_database_url
 
-# Default to SQLite
+# Default to SQLite for local dev (no DATABASE_URL needed)
 DATABASES = {
     "default": {
         "ENGINE": "django.db.backends.sqlite3",
@@ -120,28 +119,16 @@ DATABASES = {
     }
 }
 
-if DEBUG:
-    # Development: use DEV_DATABASE_URL if available, fall back to SQLite
-    DEV_DATABASE_URL = config("DEV_DATABASE_URL", cast=str, default="")
-    if DEV_DATABASE_URL:
-        DATABASES = {
-            "default": dj_database_url.config(
-                default=DEV_DATABASE_URL,
-                conn_max_age=300,
-                conn_health_checks=True
-            )
-        }
-else:
-    # Production: use PROD_DATABASE_URL if available, fall back to SQLite
-    PROD_DATABASE_URL = config("PROD_DATABASE_URL", cast=str, default="")
-    if PROD_DATABASE_URL:
-        DATABASES = {
-            "default": dj_database_url.config(
-                default=PROD_DATABASE_URL,
-                conn_max_age=300,
-                conn_health_checks=True
-            )
-        }
+# Override with DATABASE_URL if set (Railway Dev or Railway Prod)
+DATABASE_URL = config("DATABASE_URL", cast=str, default="")
+if DATABASE_URL:
+    DATABASES = {
+        "default": dj_database_url.config(
+            default=DATABASE_URL,
+            conn_max_age=300,
+            conn_health_checks=True,
+        )
+    }
 
 print("Debug mode:", DEBUG)
 db_config = DATABASES['default']
