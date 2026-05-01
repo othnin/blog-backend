@@ -63,6 +63,7 @@ RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
     printf "  python manage.py createsuperuser --noinput || true\n" >> ./paracord_runner.sh && \
     printf "  python manage.py shell -c \"from django.contrib.auth.models import User; u = User.objects.get(username='\$DJANGO_SUPERUSER_USERNAME'); u.profile.role='admin'; u.profile.email_verified=True; u.profile.save()\" || true\n" >> ./paracord_runner.sh && \
     printf "fi\n" >> ./paracord_runner.sh && \
+    printf "echo \"Django setup complete. Starting gunicorn on port \$RUN_PORT...\"\n" >> ./paracord_runner.sh && \
     printf "gunicorn ${PROJ_NAME}.wsgi:application --bind \"0.0.0.0:\$RUN_PORT\" --workers \"\${WEB_CONCURRENCY:-2}\"\n" >> ./paracord_runner.sh
 
 # make the bash script executable
