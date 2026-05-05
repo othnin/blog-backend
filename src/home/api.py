@@ -58,40 +58,58 @@ def obtain_token_pair(request, data: LoginSerializer):
     Requires email verification.
     Accepts either username or email for login.
     """
+    import logging
+    logger = logging.getLogger('django')
+
     # Rate limit: 5 login attempts per 10 minutes per IP
     check_rate_limit(request, key="login", max_requests=5, period=600)
 
+    logger.info(f'[TOKEN_PAIR] Login attempt for username: {data.username}')
+
     # Try to authenticate with username first
     user = authenticate(username=data.username, password=data.password)
+    logger.debug(f'[TOKEN_PAIR] Username auth result: {user is not None}')
 
     # If that fails, try with email
     if user is None:
         from django.contrib.auth.models import User
+        logger.debug(f'[TOKEN_PAIR] Trying email lookup for: {data.username}')
         try:
             user_by_email = User.objects.get(email=data.username)
+            logger.debug(f'[TOKEN_PAIR] Found user by email: {user_by_email.username}')
             user = authenticate(username=user_by_email.username, password=data.password)
+            logger.debug(f'[TOKEN_PAIR] Email-based auth result: {user is not None}')
         except User.DoesNotExist:
+            logger.debug(f'[TOKEN_PAIR] No user found with email: {data.username}')
             pass
 
     if user is None:
+        logger.warning(f'[TOKEN_PAIR] Auth failed - invalid credentials for: {data.username}')
         return JsonResponse({'detail': 'Invalid username/email or password'}, status=401)
 
     # Check if email is verified
+    logger.debug(f'[TOKEN_PAIR] Checking email verification for user: {user.username}')
     try:
         profile = user.profile
-        if not getattr(settings, 'SKIP_EMAIL_VERIFICATION', False) and not profile.email_verified:
+        skip_verification = getattr(settings, 'SKIP_EMAIL_VERIFICATION', False)
+        logger.debug(f'[TOKEN_PAIR] SKIP_EMAIL_VERIFICATION={skip_verification}, email_verified={profile.email_verified}')
+        if not skip_verification and not profile.email_verified:
+            logger.warning(f'[TOKEN_PAIR] Email not verified for user: {user.username}')
             return JsonResponse(
                 {'detail': 'Email not verified. Please check your email to verify your account.'},
                 status=401
             )
-    except Exception:
+    except Exception as e:
+        logger.error(f'[TOKEN_PAIR] Error checking profile: {str(e)}')
         from auth_app.models import UserProfile
         UserProfile.objects.create(user=user, email_verified=False)
+        logger.warning(f'[TOKEN_PAIR] Created new profile with email_verified=False for: {user.username}')
         return JsonResponse(
             {'detail': 'Email not verified. Please check your email to verify your account.'},
             status=401
         )
 
+    logger.info(f'[TOKEN_PAIR] Successful login for user: {user.username}')
     refresh = RefreshToken.for_user(user)
     return {
         'refresh': str(refresh),
