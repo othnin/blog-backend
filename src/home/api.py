@@ -59,7 +59,7 @@ def obtain_token_pair(request, data: LoginSerializer):
     Accepts either username or email for login.
     """
     import logging
-    logger = logging.getLogger('django')
+    logger = logging.getLogger('auth_app')
 
     # Rate limit: 5 login attempts per 10 minutes per IP
     check_rate_limit(request, key="login", max_requests=5, period=600)
