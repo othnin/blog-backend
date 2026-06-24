@@ -10,3 +10,4 @@ python-decouple
 rav
 Pillow
 django-ninja-extra
+google-auth

@@ -215,6 +215,9 @@ FRONTEND_URL = config("FRONTEND_URL", cast=str, default="http://localhost:3000")
 # In development, skip email verification to make testing easier
 SKIP_EMAIL_VERIFICATION = config("SKIP_EMAIL_VERIFICATION", cast=bool, default=config("DJANGO_DEBUG", cast=bool, default=False))
 
+# Google OAuth
+GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID", cast=str, default="")
+
 # Cache — LocMemCache for development; set CACHE_URL=redis://... for production
 CACHE_URL = config("CACHE_URL", cast=str, default="")
 if CACHE_URL:

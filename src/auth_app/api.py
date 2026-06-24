@@ -13,8 +13,12 @@ import helpers
 import io
 import os
 import uuid
+import re
 from PIL import Image
 from django.conf import settings
+from google.oauth2 import id_token
+from google.auth.transport import requests as google_requests
+from ninja_jwt.tokens import RefreshToken
 from auth_app.serializers import (
     RegisterSerializer,
     EmailVerificationSerializer,
@@ -38,11 +42,26 @@ from auth_app.utils import (
 router = Router()
 
 
+def _generate_unique_username(email):
+    """Generate a unique username from an email address."""
+    base = re.sub(r'[^a-z0-9]', '', email.split('@')[0].lower()) or 'user'
+    username, counter = base, 1
+    while User.objects.filter(username=username).exists():
+        username = f"{base}{counter}"
+        counter += 1
+    return username
+
+
 class AuthResponseSchema(Schema):
     """Response schema for auth endpoints."""
     status: str
     message: str
     user: Optional[UserResponseSchema] = None
+
+
+class GoogleLoginSchema(Schema):
+    """Request schema for Google OAuth login."""
+    credential: str
 
 
 class TokenResponseSchema(Schema):
@@ -175,13 +194,64 @@ def login(request, data: LoginSerializer):
             'message': 'Login successful',
             'user': user_data,
         }
-    
+
     except Exception as e:
         return {
             'status': 'error',
             'message': f'Login failed: {str(e)}',
             'user': None
         }
+
+@router.post("/google-login", auth=None)
+def google_login(request, payload: GoogleLoginSchema):
+    """
+    Authenticate using Google OAuth. Accepts a Google ID token.
+    Creates a new user if the email doesn't exist, or links to existing account.
+    Returns JWT tokens for successful authentication.
+
+    Required fields:
+    - credential: Google ID token from Google Identity Services
+
+    Response:
+    - Returns status and JWT tokens on success
+    - Returns error message on invalid token or verification failure
+    """
+    check_rate_limit(request, key="google_login", max_requests=10, period=600)
+
+    try:
+        idinfo = id_token.verify_oauth2_token(
+            payload.credential,
+            google_requests.Request(),
+            settings.GOOGLE_CLIENT_ID,
+        )
+    except ValueError:
+        return {"status": "error", "message": "Invalid Google credential"}
+
+    if not idinfo.get('email_verified'):
+        return {"status": "error", "message": "Google email not verified"}
+
+    email = idinfo['email']
+
+    try:
+        user = User.objects.get(email=email)
+    except User.DoesNotExist:
+        user = User.objects.create_user(
+            username=_generate_unique_username(email),
+            email=email,
+        )
+
+    profile, _ = UserProfile.objects.get_or_create(user=user)
+    if not profile.email_verified:
+        profile.email_verified = True
+        profile.save(update_fields=['email_verified'])
+
+    refresh = RefreshToken.for_user(user)
+    return {
+        "status": "success",
+        "refresh": str(refresh),
+        "access": str(refresh.access_token),
+        "username": user.username,
+    }
 
 @router.post("/verify-email", response=AuthResponseSchema)
 def verify_email(request, data: EmailVerificationSerializer):

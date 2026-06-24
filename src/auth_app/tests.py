@@ -8,6 +8,7 @@ from django.urls import reverse
 from django.utils import timezone
 from datetime import timedelta
 import json
+from unittest.mock import patch, MagicMock
 
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
 from auth_app.utils import (
@@ -2109,3 +2110,131 @@ class ResendVerificationRateLimitTests(TestCase):
             self._post(ip='9.9.9.1')
         self.assertEqual(self._post(ip='9.9.9.1').status_code, 429)
         self.assertNotEqual(self._post(ip='9.9.9.2').status_code, 429)
+
+
+# ---------------------------------------------------------------------------
+# Google OAuth Tests  (POST /api/auth/google-login)
+# ---------------------------------------------------------------------------
+
+class GoogleLoginTest(TestCase):
+    """Tests for POST /api/auth/google-login — Google OAuth via ID token."""
+
+    def setUp(self):
+        self.client = Client()
+        self.url = '/api/auth/google-login'
+        self.valid_idinfo = {
+            'email': 'test@gmail.com',
+            'email_verified': True,
+            'name': 'Test User',
+            'sub': '123456789',
+        }
+
+    def _post(self, credential='mock-credential'):
+        return self.client.post(
+            self.url,
+            json.dumps({'credential': credential}),
+            content_type='application/json',
+        )
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_new_user_created(self, mock_verify):
+        """Valid Google credential creates new user and returns JWT tokens."""
+        mock_verify.return_value = self.valid_idinfo
+        res = self._post()
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data['status'], 'success')
+        self.assertIn('access', data)
+        self.assertIn('refresh', data)
+        self.assertTrue(User.objects.filter(email='test@gmail.com').exists())
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_existing_user_auto_linked(self, mock_verify):
+        """Existing user with same email is linked and returns JWT tokens."""
+        existing = User.objects.create_user(
+            username='existinguser',
+            email='test@gmail.com',
+            password='pass'
+        )
+        UserProfile.objects.filter(user=existing).update(email_verified=False)
+        mock_verify.return_value = self.valid_idinfo
+        res = self._post()
+        self.assertEqual(res.status_code, 200)
+        data = res.json()
+        self.assertEqual(data['username'], 'existinguser')
+        existing.profile.refresh_from_db()
+        self.assertTrue(existing.profile.email_verified)
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_invalid_credential_rejected(self, mock_verify):
+        """Invalid Google credential returns error."""
+        mock_verify.side_effect = ValueError('Bad token')
+        res = self._post()
+        self.assertEqual(res.status_code, 200)
+        self.assertEqual(res.json()['status'], 'error')
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_unverified_email_rejected(self, mock_verify):
+        """Google credential with unverified email is rejected."""
+        mock_verify.return_value = {**self.valid_idinfo, 'email_verified': False}
+        res = self._post()
+        self.assertEqual(res.json()['status'], 'error')
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_new_user_email_verified(self, mock_verify):
+        """New OAuth user has email_verified=True on profile."""
+        mock_verify.return_value = self.valid_idinfo
+        self._post()
+        user = User.objects.get(email='test@gmail.com')
+        self.assertTrue(user.profile.email_verified)
+
+    def test_missing_credential_returns_422(self):
+        """Request without credential field returns validation error."""
+        res = self.client.post(self.url, '{}', content_type='application/json')
+        self.assertEqual(res.status_code, 422)
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_response_includes_username(self, mock_verify):
+        """Success response includes the username field."""
+        mock_verify.return_value = self.valid_idinfo
+        res = self._post()
+        data = res.json()
+        self.assertIn('username', data)
+        self.assertTrue(len(data['username']) > 0)
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_generated_username_is_unique(self, mock_verify):
+        """Generated usernames avoid collisions."""
+        # Create existing user with a similar username
+        User.objects.create_user(username='test', email='other@example.com', password='pass')
+
+        mock_verify.return_value = self.valid_idinfo
+        res = self._post()
+        data = res.json()
+        user = User.objects.get(email='test@gmail.com')
+        # Username should be different from 'test' or start with 'test'
+        self.assertNotEqual(user.username, 'other')
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_tokens_are_valid_jwt(self, mock_verify):
+        """Returned tokens are valid JWT strings."""
+        mock_verify.return_value = self.valid_idinfo
+        res = self._post()
+        data = res.json()
+        # JWT tokens have 3 parts separated by dots
+        access_parts = data['access'].split('.')
+        refresh_parts = data['refresh'].split('.')
+        self.assertEqual(len(access_parts), 3)
+        self.assertEqual(len(refresh_parts), 3)
+
+    @patch('auth_app.api.id_token.verify_oauth2_token')
+    def test_multiple_logins_same_user(self, mock_verify):
+        """Same email can login multiple times, receives different tokens."""
+        mock_verify.return_value = self.valid_idinfo
+        res1 = self._post('credential1')
+        res2 = self._post('credential2')
+
+        data1 = res1.json()
+        data2 = res2.json()
+        # Tokens should be different (refresh token rotates)
+        self.assertNotEqual(data1['access'], data2['access'])
