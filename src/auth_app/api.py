@@ -518,13 +518,15 @@ def upload_avatar(request, file: UploadedFile = File(...)):
     """
     Upload and resize a user avatar image.
     Accepts JPEG, PNG, WebP. Resizes to max 400x400 before saving.
+    Works with both local filesystem and S3-compatible storage (Tigris).
     """
+    from django.core.files.storage import default_storage
+    from ninja.errors import HttpError
+
     allowed = {'image/jpeg', 'image/png', 'image/webp'}
     if file.content_type not in allowed:
-        from ninja.errors import HttpError
         raise HttpError(400, "Only JPEG, PNG, and WebP images are allowed.")
     if file.size > 10 * 1024 * 1024:
-        from ninja.errors import HttpError
         raise HttpError(400, "Image must be under 10 MB.")
 
     img = Image.open(file)
@@ -533,18 +535,21 @@ def upload_avatar(request, file: UploadedFile = File(...)):
 
     ext = 'jpg'
     filename = f"{uuid.uuid4().hex}.{ext}"
-    save_dir = settings.MEDIA_ROOT / 'avatars'
-    save_dir.mkdir(parents=True, exist_ok=True)
-    save_path = save_dir / filename
+    filepath = f'avatars/{filename}'
 
-    img.save(save_path, format='JPEG', quality=85)
+    img_bytes = io.BytesIO()
+    img.save(img_bytes, format='JPEG', quality=85)
+    img_bytes.seek(0)
+
+    default_storage.save(filepath, img_bytes)
 
     profile = request.user.profile
     if profile.avatar:
-        old_path = settings.MEDIA_ROOT / profile.avatar.name
-        if old_path.exists():
-            old_path.unlink()
-    profile.avatar = f'avatars/{filename}'
+        old_filepath = profile.avatar.name
+        if default_storage.exists(old_filepath):
+            default_storage.delete(old_filepath)
+
+    profile.avatar = filepath
     profile.save(update_fields=['avatar'])
 
     avatar_url = request.build_absolute_uri(profile.avatar.url)
