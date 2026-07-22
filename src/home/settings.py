@@ -26,16 +26,13 @@ SECRET_KEY = config("DJANGO_SECRET_KEY", cast=str)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DJANGO_DEBUG", cast=bool, default=False)
 
-ALLOWED_HOSTS = [
-    ".railway.app"
-]
+ALLOWED_HOSTS = config("ALLOWED_HOSTS_STR", cast=str, default=".railway.app").split(",")
+ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS if h.strip()]
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
 
-CSRF_TRUSTED_ORIGINS = [
-    "http://*.railway.app",
-    "https://*.railway.app",
-]
+CSRF_ALLOWED_ORIGINS_STR = config("CSRF_ALLOWED_ORIGINS_STR", cast=str, default="http://*.railway.app,https://*.railway.app")
+CSRF_TRUSTED_ORIGINS = [o.strip() for o in CSRF_ALLOWED_ORIGINS_STR.split(",") if o.strip()]
 
 # Application definition
 
@@ -131,17 +128,6 @@ if DATABASE_URL:
         )
     }
 
-print("Debug mode:", DEBUG)
-db_config = DATABASES['default']
-db_engine = db_config.get('ENGINE', 'unknown')
-db_host = db_config.get('HOST', 'local')
-db_port = db_config.get('PORT', 'N/A')
-db_name = db_config.get('NAME', 'unknown')
-print(f"Using database: {db_engine}")
-if 'sqlite' in db_engine.lower():
-    print(f"  SQLite database at: {db_name}")
-else:
-    print(f"  {db_host}:{db_port}/{db_name}")
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators
 
@@ -180,8 +166,35 @@ STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 STATICFILES_STORAGE = "whitenoise.storage.CompressedManifestStaticFilesStorage"
 
-MEDIA_URL = '/media/'
-MEDIA_ROOT = BASE_DIR / 'media'
+# Media storage: S3-compatible (Tigris) if credentials provided, else local filesystem
+AWS_STORAGE_BUCKET_NAME = config("AWS_STORAGE_BUCKET_NAME", cast=str, default="")
+if AWS_STORAGE_BUCKET_NAME:
+    # Use S3-compatible storage (Tigris)
+    DEFAULT_FILE_STORAGE = "storages.backends.s3boto3.S3Boto3Storage"
+    STORAGES = {
+        "default": {
+            "BACKEND": "storages.backends.s3boto3.S3Boto3Storage",
+        },
+        "staticfiles": {
+            "BACKEND": "whitenoise.storage.CompressedManifestStaticFilesStorage",
+        },
+    }
+    AWS_S3_ENDPOINT_URL = config("AWS_S3_ENDPOINT_URL", cast=str, default="")
+    AWS_S3_REGION_NAME = config("AWS_S3_REGION_NAME", cast=str, default="auto")
+    AWS_ACCESS_KEY_ID = config("AWS_ACCESS_KEY_ID", cast=str, default="")
+    AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY", cast=str, default="")
+    AWS_S3_CUSTOM_DOMAIN = config("AWS_S3_CUSTOM_DOMAIN", cast=str, default="")
+    AWS_S3_USE_SSL = config("AWS_S3_USE_SSL", cast=bool, default=True)
+    AWS_QUERYSTRING_AUTH = False
+    if AWS_S3_CUSTOM_DOMAIN:
+        MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
+    else:
+        MEDIA_URL = f"{AWS_S3_ENDPOINT_URL}/media/"
+    MEDIA_ROOT = None
+else:
+    # Fallback to local filesystem for development
+    MEDIA_URL = '/media/'
+    MEDIA_ROOT = BASE_DIR / 'media'
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.0/ref/settings/#default-auto-field
