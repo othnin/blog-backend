@@ -185,7 +185,7 @@ if AWS_STORAGE_BUCKET_NAME:
     AWS_SECRET_ACCESS_KEY = config("AWS_SECRET_ACCESS_KEY", cast=str, default="")
     AWS_S3_CUSTOM_DOMAIN = config("AWS_S3_CUSTOM_DOMAIN", cast=str, default="")
     AWS_S3_USE_SSL = config("AWS_S3_USE_SSL", cast=bool, default=True)
-    AWS_QUERYSTRING_AUTH = False
+    AWS_QUERYSTRING_AUTH = True
     if AWS_S3_CUSTOM_DOMAIN:
         MEDIA_URL = f"https://{AWS_S3_CUSTOM_DOMAIN}/media/"
     else:
