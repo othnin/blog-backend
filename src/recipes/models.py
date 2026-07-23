@@ -7,6 +7,7 @@ from django.db import models
 from django.contrib.auth.models import User
 from django.utils.text import slugify
 from django.utils import timezone
+from helpers.lexical import lexical_to_text
 
 
 class DietaryLabel(models.Model):
@@ -76,12 +77,13 @@ class Recipe(models.Model):
         on_delete=models.CASCADE,
         related_name='recipes',
     )
-    description = models.TextField(blank=True, default='')
+    description = models.TextField(blank=True, default='', help_text='Lexical JSON format')
+    description_text = models.TextField(blank=True, default='', help_text='Plain-text extract of description, kept in sync on save, used for search/preview')
 
     # Images stored as JSON list of URL strings; images[0] is the hero image
     images = models.JSONField(default=list, blank=True)
 
-    notes = models.TextField(blank=True, default='')
+    notes = models.TextField(blank=True, default='', help_text='Lexical JSON format')
 
     # Timing
     prep_time_minutes = models.PositiveIntegerField(null=True, blank=True)
@@ -138,6 +140,7 @@ class Recipe(models.Model):
             self.slug = slugify(self.title)
         if self.status == 'published' and not self.published_at:
             self.published_at = timezone.now()
+        self.description_text = lexical_to_text(self.description)
         super().save(*args, **kwargs)
 
     def increment_view_count(self):
@@ -169,7 +172,7 @@ class RecipeInstruction(models.Model):
     recipe = models.ForeignKey(Recipe, on_delete=models.CASCADE, related_name='instructions')
     step_number = models.PositiveSmallIntegerField()
     title = models.CharField(max_length=200, blank=True, default='')
-    content = models.TextField()
+    content = models.TextField(help_text='Lexical JSON format')
 
     class Meta:
         ordering = ['step_number']

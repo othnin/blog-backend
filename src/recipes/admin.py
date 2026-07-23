@@ -16,7 +16,7 @@ class RecipeInstructionInline(admin.TabularInline):
 class RecipeAdmin(admin.ModelAdmin):
     list_display = ['title', 'author', 'status', 'cuisine_type', 'course', 'created_at']
     list_filter = ['status', 'cuisine_type', 'course', 'dietary_labels']
-    search_fields = ['title', 'description', 'author__username']
+    search_fields = ['title', 'description_text', 'author__username']
     prepopulated_fields = {'slug': ('title',)}
     inlines = [RecipeIngredientInline, RecipeInstructionInline]
 

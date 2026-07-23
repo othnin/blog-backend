@@ -18,8 +18,6 @@ from helpers.rate_limit import check_rate_limit
 from ninja import File
 from ninja.files import UploadedFile
 import uuid, os
-import boto3
-from botocore.exceptions import ClientError
 from .serializers import (
     BlogPostCreateIn,
     BlogPostUpdateIn,
@@ -393,6 +391,9 @@ class BlogController:
 
         if settings.AWS_STORAGE_BUCKET_NAME:
             try:
+                import boto3
+                from botocore.exceptions import ClientError
+
                 s3_client = boto3.client(
                     's3',
                     endpoint_url=settings.AWS_S3_ENDPOINT_URL,
@@ -412,7 +413,7 @@ class BlogController:
                 )
 
                 return {"url": url}
-            except ClientError as e:
+            except Exception as e:
                 raise HttpError(500, f"Failed to generate image URL: {str(e)}")
         else:
             url = f"{settings.MEDIA_URL}{filename}"

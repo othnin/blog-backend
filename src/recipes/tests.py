@@ -8,6 +8,25 @@ from .models import Recipe, RecipeIngredient, RecipeInstruction, RecipeRating, D
 import json
 
 
+def _wrap_as_lexical(text):
+    """Wrap plain text as Lexical JSON for tests."""
+    return json.dumps({
+        "root": {
+            "children": [
+                {
+                    "type": "paragraph",
+                    "children": [
+                        {"type": "text", "text": text, "format": 0}
+                    ],
+                    "format": ""
+                }
+            ],
+            "type": "root",
+            "format": ""
+        }
+    })
+
+
 def make_user(username, role='editor', email=None):
     user = User.objects.create_user(
         username=username,
@@ -71,15 +90,15 @@ class RecipeCRUDTests(TestCase):
     def _create_recipe(self, status='published', title='Pasta Carbonara'):
         payload = {
             'title': title,
-            'description': 'A classic Italian dish.',
+            'description': _wrap_as_lexical('A classic Italian dish.'),
             'status': status,
             'ingredients': [
                 {'order': 0, 'amount': '200', 'unit': 'g', 'name': 'Pasta', 'notes': ''},
                 {'order': 1, 'amount': '100', 'unit': 'g', 'name': 'Pancetta', 'notes': ''},
             ],
             'instructions': [
-                {'step_number': 1, 'title': 'Boil pasta', 'content': 'Boil the pasta in salted water.'},
-                {'step_number': 2, 'title': 'Fry pancetta', 'content': 'Fry the pancetta until crispy.'},
+                {'step_number': 1, 'title': 'Boil pasta', 'content': _wrap_as_lexical('Boil the pasta in salted water.')},
+                {'step_number': 2, 'title': 'Fry pancetta', 'content': _wrap_as_lexical('Fry the pancetta until crispy.')},
             ],
             'prep_time_minutes': 10,
             'cook_time_minutes': 20,
@@ -144,12 +163,12 @@ class RecipeCRUDTests(TestCase):
         recipe = Recipe.objects.first()
         resp = self.client.put(
             f'/api/recipes/{recipe.id}/',
-            data=json.dumps({'description': 'Updated description'}),
+            data=json.dumps({'description': _wrap_as_lexical('Updated description')}),
             content_type='application/json',
             **self.editor_headers,
         )
         self.assertEqual(resp.status_code, 200)
-        self.assertEqual(resp.json()['description'], 'Updated description')
+        self.assertIn('Updated description', resp.json()['description'])
 
     def test_delete_recipe(self):
         self._create_recipe()

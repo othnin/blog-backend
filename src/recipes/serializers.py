@@ -5,6 +5,7 @@ from pydantic import BaseModel, Field, field_validator
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
+import json
 
 
 class DietaryLabelOut(BaseModel):
@@ -63,6 +64,15 @@ class RecipeInstructionIn(BaseModel):
     title: str = Field(default='', max_length=200)
     content: str = Field(..., min_length=1)
 
+    @field_validator('content')
+    @classmethod
+    def validate_content_json(cls, v):
+        try:
+            json.loads(v)
+        except json.JSONDecodeError:
+            raise ValueError('content must be valid JSON')
+        return v
+
 
 class RecipeInstructionOut(BaseModel):
     id: int
@@ -100,6 +110,26 @@ class RecipeCreateIn(BaseModel):
             raise ValueError(f'Status must be one of {valid}')
         return v
 
+    @field_validator('description')
+    @classmethod
+    def validate_description_json(cls, v):
+        if v and v.strip():
+            try:
+                json.loads(v)
+            except json.JSONDecodeError:
+                raise ValueError('description must be valid JSON')
+        return v
+
+    @field_validator('notes')
+    @classmethod
+    def validate_notes_json(cls, v):
+        if v and v.strip():
+            try:
+                json.loads(v)
+            except json.JSONDecodeError:
+                raise ValueError('notes must be valid JSON')
+        return v
+
 
 class RecipeUpdateIn(BaseModel):
     title: Optional[str] = Field(None, min_length=1, max_length=500)
@@ -129,6 +159,30 @@ class RecipeUpdateIn(BaseModel):
             raise ValueError(f'Status must be one of {valid}')
         return v
 
+    @field_validator('description')
+    @classmethod
+    def validate_description_json(cls, v):
+        if v is None:
+            return v
+        if v and v.strip():
+            try:
+                json.loads(v)
+            except json.JSONDecodeError:
+                raise ValueError('description must be valid JSON')
+        return v
+
+    @field_validator('notes')
+    @classmethod
+    def validate_notes_json(cls, v):
+        if v is None:
+            return v
+        if v and v.strip():
+            try:
+                json.loads(v)
+            except json.JSONDecodeError:
+                raise ValueError('notes must be valid JSON')
+        return v
+
 
 class RecipeListOut(BaseModel):
     """Summary output for recipe list pages."""
@@ -142,6 +196,7 @@ class RecipeListOut(BaseModel):
     created_at: datetime
     author: RecipeAuthorOut
     description: str = ''
+    description_text: str = ''
     images: List[str] = []
     cuisine_type: str = ''
     course: str = ''

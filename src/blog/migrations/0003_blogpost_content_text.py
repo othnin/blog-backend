@@ -3,11 +3,11 @@ from django.db import migrations, models
 
 def backfill_content_text(apps, schema_editor):
     """Populate content_text for all existing blog posts."""
-    from blog.models import _lexical_to_text
+    from helpers.lexical import lexical_to_text
     BlogPost = apps.get_model('blog', 'BlogPost')
     posts = BlogPost.objects.exclude(content_json='')
     for post in posts:
-        post.content_text = _lexical_to_text(post.content_json)
+        post.content_text = lexical_to_text(post.content_json)
     BlogPost.objects.bulk_update(posts, ['content_text'])
 
 

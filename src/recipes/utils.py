@@ -69,7 +69,7 @@ def get_published_recipes(
     if search:
         qs = qs.filter(
             Q(title__icontains=search) |
-            Q(description__icontains=search) |
+            Q(description_text__icontains=search) |
             Q(author__username__icontains=search)
         )
 
