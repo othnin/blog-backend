@@ -11,6 +11,7 @@ from django.shortcuts import get_object_or_404
 from django.utils import timezone
 from django.utils.text import slugify
 from django.conf import settings
+from django.core.files.storage import default_storage
 from typing import List, Optional
 from .models import BlogPost, Category, Comment, Tag
 from helpers.rate_limit import check_rate_limit
@@ -368,14 +369,12 @@ class BlogController:
 
         ext = os.path.splitext(file.name)[1].lower()
         filename = f"{uuid.uuid4().hex}{ext}"
-        save_path = settings.MEDIA_ROOT / 'blog_images' / filename
-        save_path.parent.mkdir(parents=True, exist_ok=True)
+        file_path = f"blog_images/{filename}"
 
-        with open(save_path, 'wb') as f:
-            for chunk in file.chunks():
-                f.write(chunk)
+        saved_path = default_storage.save(file_path, file)
+        url = default_storage.url(saved_path)
 
-        return {"url": f"{settings.MEDIA_URL}blog_images/{filename}"}
+        return {"url": url}
 
 
 # ─── Comment helpers (implemented in blog/utils.py, imported above) ───────────
