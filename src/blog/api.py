@@ -18,6 +18,8 @@ from helpers.rate_limit import check_rate_limit
 from ninja import File
 from ninja.files import UploadedFile
 import uuid, os
+import boto3
+from botocore.exceptions import ClientError
 from .serializers import (
     BlogPostCreateIn,
     BlogPostUpdateIn,
@@ -375,6 +377,46 @@ class BlogController:
         url = default_storage.url(saved_path)
 
         return {"url": url}
+
+    @http_get(
+        "/image-url/",
+        description="Get a fresh signed URL for a blog image (for private S3 buckets)"
+    )
+    def get_image_url(self, request, filename: str):
+        """
+        Generate a fresh signed URL for accessing a blog image.
+        This handles private S3 buckets by generating time-limited signed URLs.
+        For local filesystem storage, returns the standard media URL.
+        """
+        if not filename or not filename.startswith('blog_images/'):
+            raise HttpError(400, "Invalid image filename")
+
+        if settings.AWS_STORAGE_BUCKET_NAME:
+            try:
+                s3_client = boto3.client(
+                    's3',
+                    endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+                    aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                    aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                    region_name=settings.AWS_S3_REGION_NAME,
+                    use_ssl=settings.AWS_S3_USE_SSL,
+                )
+
+                url = s3_client.generate_presigned_url(
+                    'get_object',
+                    Params={
+                        'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                        'Key': filename,
+                    },
+                    ExpiresIn=86400  # 24 hours
+                )
+
+                return {"url": url}
+            except ClientError as e:
+                raise HttpError(500, f"Failed to generate image URL: {str(e)}")
+        else:
+            url = f"{settings.MEDIA_URL}{filename}"
+            return {"url": url}
 
 
 # ─── Comment helpers (implemented in blog/utils.py, imported above) ───────────
