@@ -4,6 +4,7 @@ Includes registration, email verification, and password reset.
 """
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
+from django.db import transaction
 from ninja import Router, Schema, File
 from ninja.files import UploadedFile
 from ninja_jwt.authentication import JWTAuth
@@ -566,6 +567,66 @@ def change_password(request, data: ChangePasswordSchema):
     user.set_password(data.new_password)
     user.save()
     return {'status': 'success', 'message': 'Password changed successfully'}
+
+
+@router.delete("/delete-account", auth=JWTAuth())
+@transaction.atomic
+def delete_account(request):
+    """
+    Delete the authenticated user's account and anonymize their content.
+    - Deletes user profile and account
+    - Sets all blog posts, recipes, and comments to anonymous (author=null)
+    - Deletes avatar file
+    """
+    from blog.models import BlogPost, Comment
+    from storage_backends import default_storage
+
+    user = request.user
+    user_id = user.id
+
+    try:
+        # Get user profile to access avatar
+        profile = UserProfile.objects.get(user=user)
+
+        # Delete avatar file if it exists
+        if profile.avatar:
+            avatar_path = profile.avatar.name
+            if default_storage.exists(avatar_path):
+                default_storage.delete(avatar_path)
+
+        # Anonymize blog posts (set author to null)
+        BlogPost.objects.filter(author=user).update(author=None)
+
+        # Anonymize comments (set author to null)
+        Comment.objects.filter(author=user).update(author=None)
+
+        # Try to anonymize recipes if the app exists
+        try:
+            from recipes.models import Recipe
+            Recipe.objects.filter(author=user).update(author=None)
+        except ImportError:
+            pass
+
+        # Delete all email/password reset tokens for this user
+        EmailVerificationToken.objects.filter(user=user).delete()
+        PasswordResetToken.objects.filter(user=user).delete()
+
+        # Delete the user profile
+        profile.delete()
+
+        # Delete the user account
+        user.delete()
+
+        return {
+            'status': 'success',
+            'message': 'Your account has been deleted. Your content will remain published but with no author.'
+        }
+
+    except Exception as e:
+        return {
+            'status': 'error',
+            'message': f'An error occurred while deleting your account: {str(e)}'
+        }, 500
 
 
 @router.get("/profile/{username}")
