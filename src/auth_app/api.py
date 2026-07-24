@@ -443,7 +443,7 @@ def resend_verification_email(request, data: ResendVerificationSchema):
     }
 
 
-@router.get("/me", response=UserResponseSchema, auth=JWTAuth())
+@router.get("/me", auth=JWTAuth())
 def get_current_user(request):
     """
     Get the current authenticated user's information.
@@ -465,44 +465,44 @@ def get_current_user(request):
         profile = None
 
     return {
-        'id': user.id,
-        'username': user.username,
-        'email': user.email,
-        'first_name': user.first_name,
-        'last_name': user.last_name,
+        'id': int(user.id),
+        'username': str(user.username),
+        'email': str(user.email),
+        'first_name': str(user.first_name) if user.first_name else None,
+        'last_name': str(user.last_name) if user.last_name else None,
         'profile': {
-            'role': role,
-            'avatar': avatar_url,
-            'display_name': profile.display_name if profile else '',
-            'bio': profile.bio if profile else '',
-            'email_notifications': profile.email_notifications if profile else True,
-            'twitter_url': profile.twitter_url if profile else '',
-            'github_url': profile.github_url if profile else '',
-            'website_url': profile.website_url if profile else '',
-            'profile_public': profile.profile_public if profile else True,
+            'role': str(role) if role else None,
+            'avatar': str(avatar_url) if avatar_url else None,
+            'display_name': str(profile.display_name) if profile and profile.display_name else '',
+            'bio': str(profile.bio) if profile and profile.bio else '',
+            'email_notifications': bool(profile.email_notifications) if profile else True,
+            'twitter_url': str(profile.twitter_url) if profile and profile.twitter_url else '',
+            'github_url': str(profile.github_url) if profile and profile.github_url else '',
+            'website_url': str(profile.website_url) if profile and profile.website_url else '',
+            'profile_public': bool(profile.profile_public) if profile else True,
         }
     }
 
 
-@router.get("/settings", response=UserSettingsSchema, auth=JWTAuth())
+@router.get("/settings", auth=JWTAuth())
 def get_settings(request):
     """Get the current user's profile settings."""
     user = request.user
     profile = user.profile
     avatar_url = _get_avatar_url(profile)
     return {
-        'display_name': profile.display_name,
-        'bio': profile.bio,
-        'email_notifications': profile.email_notifications,
-        'twitter_url': profile.twitter_url,
-        'github_url': profile.github_url,
-        'website_url': profile.website_url,
-        'profile_public': profile.profile_public,
-        'avatar_url': avatar_url,
+        'display_name': str(profile.display_name) if profile.display_name else '',
+        'bio': str(profile.bio) if profile.bio else '',
+        'email_notifications': bool(profile.email_notifications),
+        'twitter_url': str(profile.twitter_url) if profile.twitter_url else '',
+        'github_url': str(profile.github_url) if profile.github_url else '',
+        'website_url': str(profile.website_url) if profile.website_url else '',
+        'profile_public': bool(profile.profile_public),
+        'avatar_url': str(avatar_url) if avatar_url else None,
     }
 
 
-@router.patch("/settings", response=UserSettingsSchema, auth=JWTAuth())
+@router.patch("/settings", auth=JWTAuth())
 def update_settings(request, data: UserSettingsUpdateSchema):
     """Update the current user's profile settings."""
     user = request.user
@@ -512,14 +512,14 @@ def update_settings(request, data: UserSettingsUpdateSchema):
     profile.save()
     avatar_url = _get_avatar_url(profile)
     return {
-        'display_name': profile.display_name,
-        'bio': profile.bio,
-        'email_notifications': profile.email_notifications,
-        'twitter_url': profile.twitter_url,
-        'github_url': profile.github_url,
-        'website_url': profile.website_url,
-        'profile_public': profile.profile_public,
-        'avatar_url': avatar_url,
+        'display_name': str(profile.display_name) if profile.display_name else '',
+        'bio': str(profile.bio) if profile.bio else '',
+        'email_notifications': bool(profile.email_notifications),
+        'twitter_url': str(profile.twitter_url) if profile.twitter_url else '',
+        'github_url': str(profile.github_url) if profile.github_url else '',
+        'website_url': str(profile.website_url) if profile.website_url else '',
+        'profile_public': bool(profile.profile_public),
+        'avatar_url': str(avatar_url) if avatar_url else None,
     }
 
 
