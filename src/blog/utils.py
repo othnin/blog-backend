@@ -7,6 +7,7 @@ from django.utils.text import slugify
 from django.conf import settings
 from .models import BlogPost, Category, Comment
 from typing import Optional
+from helpers.storage import get_presigned_url_or_none
 
 
 def create_unique_slug(title: str, existing_slugs=None) -> str:
@@ -110,7 +111,7 @@ def get_published_posts(limit: Optional[int] = None, category: Optional[str] = N
 def _author_dict(user):
     """Build a comment author dict including avatar_url."""
     try:
-        avatar_url = f"{settings.MEDIA_URL}{user.profile.avatar.name}" if user.profile.avatar else None
+        avatar_url = get_presigned_url_or_none(user.profile.avatar.name) if user.profile.avatar else None
     except Exception:
         avatar_url = None
     return {'id': user.id, 'username': user.username, 'avatar_url': avatar_url}

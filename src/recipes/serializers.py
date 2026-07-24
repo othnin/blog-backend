@@ -1,11 +1,12 @@
 """
 Serializers for recipe models using Pydantic and Django Ninja.
 """
-from pydantic import BaseModel, Field, field_validator
+from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 import json
+from helpers.storage import get_presigned_url_or_none
 
 
 class DietaryLabelOut(BaseModel):
@@ -37,6 +38,20 @@ class RecipeAuthorOut(BaseModel):
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode='before')
+    @classmethod
+    def resolve_avatar(cls, data):
+        if hasattr(data, 'id'):  # ORM User object
+            try:
+                avatar_url = (
+                    get_presigned_url_or_none(data.profile.avatar.name)
+                    if data.profile.avatar else None
+                )
+            except Exception:
+                avatar_url = None
+            return {'id': data.id, 'username': data.username, 'avatar_url': avatar_url}
+        return data
 
 
 class RecipeIngredientIn(BaseModel):

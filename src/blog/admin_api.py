@@ -20,6 +20,7 @@ from .models import BlogPost, Category, Comment, Tag
 from recipes.models import Recipe
 from ninja import File
 from ninja.files import UploadedFile
+from helpers.storage import get_presigned_url_or_none
 from .serializers import (
     AdminDashboardOut,
     AdminUserOut,
@@ -47,7 +48,7 @@ def _build_user_out(user) -> AdminUserOut:
         p = user.profile
         avatar_url = None
         if p.avatar:
-            avatar_url = f"{settings.MEDIA_URL}{p.avatar.name}"
+            avatar_url = get_presigned_url_or_none(p.avatar.name)
         profile_out = AdminUserProfileOut(
             role=p.role,
             email_verified=p.email_verified,
@@ -85,11 +86,12 @@ def _build_post_out(post) -> AdminPostListOut:
 
 
 def _build_category_out(category) -> AdminCategoryOut:
+    image_url = get_presigned_url_or_none(category.image_url) if category.image_url else ''
     return AdminCategoryOut(
         id=category.id,
         name=category.name,
         slug=category.slug,
-        image_url=category.image_url or '',
+        image_url=image_url,
         post_count=category.blog_posts.count(),
         created_at=category.created_at,
     )
@@ -251,15 +253,10 @@ class AdminController:
 
         ext = os.path.splitext(file.name)[1].lower()
         filename = f"{uuid.uuid4().hex}{ext}"
-        save_dir = settings.MEDIA_ROOT / 'category_images'
-        save_dir.mkdir(parents=True, exist_ok=True)
-        save_path = save_dir / filename
+        key = f"category_images/{filename}"
 
-        with open(save_path, 'wb') as f:
-            for chunk in file.chunks():
-                f.write(chunk)
-
-        category.image_url = f"{settings.MEDIA_URL}category_images/{filename}"
+        saved_path = default_storage.save(key, file)
+        category.image_url = saved_path
         category.save(update_fields=['image_url', 'updated_at'])
         return _build_category_out(category)
 

@@ -33,6 +33,7 @@ from auth_app.serializers import (
 )
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
 from helpers.rate_limit import check_rate_limit
+from helpers.storage import get_presigned_url_or_none, get_presigned_url
 from auth_app.utils import (
     create_email_verification_token,
     create_password_reset_token,
@@ -57,31 +58,8 @@ def _get_avatar_url(profile):
     """Get a fresh signed URL for a user's avatar, or None if no avatar."""
     if not profile or not profile.avatar:
         return None
-
-    filename = profile.avatar.name
-    if settings.AWS_STORAGE_BUCKET_NAME:
-        try:
-            import boto3
-            s3_client = boto3.client(
-                's3',
-                endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME,
-                use_ssl=settings.AWS_S3_USE_SSL,
-            )
-            return s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
-                    'Key': filename,
-                },
-                ExpiresIn=86400  # 24 hours
-            )
-        except Exception:
-            return None
-    else:
-        return f"{settings.MEDIA_URL}{filename}"
+    url = get_presigned_url_or_none(profile.avatar.name)
+    return str(url) if url else None
 
 
 class AuthResponseSchema(Schema):
@@ -511,7 +489,7 @@ def get_settings(request):
     """Get the current user's profile settings."""
     user = request.user
     profile = user.profile
-    avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+    avatar_url = _get_avatar_url(profile)
     return {
         'display_name': profile.display_name,
         'bio': profile.bio,
@@ -532,7 +510,7 @@ def update_settings(request, data: UserSettingsUpdateSchema):
     for field, value in data.model_dump(exclude_unset=True).items():
         setattr(profile, field, value)
     profile.save()
-    avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+    avatar_url = _get_avatar_url(profile)
     return {
         'display_name': profile.display_name,
         'bio': profile.bio,
@@ -594,41 +572,16 @@ def get_avatar_url(request, filename: str):
     For private S3 buckets, returns a presigned URL with 24-hour expiration.
     For local filesystem storage, returns the standard media URL.
     """
-    from django.conf import settings
     from ninja.errors import HttpError
 
     if not filename or not filename.startswith('avatars/'):
         raise HttpError(400, "Invalid avatar filename")
 
-    if settings.AWS_STORAGE_BUCKET_NAME:
-        try:
-            import boto3
-            from botocore.exceptions import ClientError
-
-            s3_client = boto3.client(
-                's3',
-                endpoint_url=settings.AWS_S3_ENDPOINT_URL,
-                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
-                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
-                region_name=settings.AWS_S3_REGION_NAME,
-                use_ssl=settings.AWS_S3_USE_SSL,
-            )
-
-            url = s3_client.generate_presigned_url(
-                'get_object',
-                Params={
-                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
-                    'Key': filename,
-                },
-                ExpiresIn=86400  # 24 hours
-            )
-
-            return {"url": url}
-        except Exception as e:
-            raise HttpError(500, f"Failed to generate avatar URL: {str(e)}")
-    else:
-        url = f"{settings.MEDIA_URL}{filename}"
+    try:
+        url = get_presigned_url(filename)
         return {"url": url}
+    except Exception as e:
+        raise HttpError(500, f"Failed to generate avatar URL: {str(e)}")
 
 
 @router.post("/change-password", auth=JWTAuth())
@@ -719,7 +672,7 @@ def get_public_profile(request, username: str):
     if not profile or not profile.profile_public:
         raise HttpError(404, "Profile not found")
 
-    avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+    avatar_url = _get_avatar_url(profile)
     return {
         'username': user.username,
         'display_name': profile.display_name,

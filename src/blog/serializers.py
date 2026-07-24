@@ -6,6 +6,7 @@ from pydantic import BaseModel, Field, field_validator, model_validator
 from typing import Optional, List
 from datetime import datetime
 import json
+from helpers.storage import get_presigned_url_or_none
 
 
 class CategoryOut(BaseModel):
@@ -44,8 +45,7 @@ class UserWithProfileOut(UserBasicOut):
         """Resolve avatar URL from user.profile.avatar ImageField."""
         try:
             if obj.profile.avatar:
-                from django.conf import settings
-                return f"{settings.MEDIA_URL}{obj.profile.avatar.name}"
+                return get_presigned_url_or_none(obj.profile.avatar.name)
             return None
         except Exception:
             return None
@@ -159,9 +159,8 @@ class BlogPostAuthorOut(BaseModel):
     def resolve_avatar(cls, data):
         if hasattr(data, 'id'):  # ORM User object
             try:
-                from django.conf import settings
                 avatar_url = (
-                    f"{settings.MEDIA_URL}{data.profile.avatar.name}"
+                    get_presigned_url_or_none(data.profile.avatar.name)
                     if data.profile.avatar else None
                 )
             except Exception:
