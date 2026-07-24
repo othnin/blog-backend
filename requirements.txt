@@ -13,3 +13,4 @@ django-ninja-extra~=0.19
 google-auth~=2.25
 django-storages~=1.14
 boto3~=1.28
+resend~=2.0

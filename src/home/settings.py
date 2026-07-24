@@ -220,6 +220,7 @@ EMAIL_USE_SSL = config("EMAIL_USE_SSL", cast=bool, default=False)
 EMAIL_HOST_USER = config("EMAIL_HOST_USER", cast=str, default="")
 EMAIL_HOST_PASSWORD = config("EMAIL_HOST_PASSWORD", cast=str, default="")
 DEFAULT_FROM_EMAIL = config("DEFAULT_FROM_EMAIL", cast=str, default="noreply@gardenblog.com")
+RESEND_API_KEY = config("RESEND_API_KEY", cast=str, default="")
 
 # Frontend URL for email links
 FRONTEND_URL = config("FRONTEND_URL", cast=str, default="http://localhost:3000")
