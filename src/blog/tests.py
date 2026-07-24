@@ -863,8 +863,8 @@ class ImageUploadTests(TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
-    def test_upload_image_returns_url(self):
-        """Response includes the image URL."""
+    def test_upload_image_returns_filename(self):
+        """Response includes the image filename."""
         token = self._get_access_token(self.editor)
         response = self.client.post(
             self.upload_url,
@@ -872,8 +872,8 @@ class ImageUploadTests(TestCase):
             HTTP_AUTHORIZATION=f'Bearer {token}'
         )
         body = json.loads(response.content)
-        self.assertIn('url', body)
-        self.assertIn('blog_images/', body['url'])
+        self.assertIn('filename', body)
+        self.assertIn('blog_images/', body['filename'])
 
     def test_upload_image_accepts_jpeg(self):
         """JPEG images are accepted."""
@@ -965,8 +965,8 @@ class ImageUploadTests(TestCase):
             )
             self.assertEqual(response.status_code, 400)
 
-    def test_upload_image_url_includes_media_url_prefix(self):
-        """Returned URL includes the MEDIA_URL prefix."""
+    def test_upload_image_filename_format(self):
+        """Returned filename has correct format."""
         token = self._get_access_token(self.editor)
         response = self.client.post(
             self.upload_url,
@@ -974,21 +974,21 @@ class ImageUploadTests(TestCase):
             HTTP_AUTHORIZATION=f'Bearer {token}'
         )
         body = json.loads(response.content)
-        # Should include /media/ prefix
-        self.assertIn('/media/', body['url'])
+        self.assertIn('blog_images/', body['filename'])
+        self.assertTrue(body['filename'].endswith('.jpg') or body['filename'].endswith('.jpeg'))
 
-    def test_upload_image_multiple_uploads_different_urls(self):
-        """Multiple image uploads return different URLs."""
+    def test_upload_image_multiple_uploads_different_filenames(self):
+        """Multiple image uploads return different filenames."""
         token = self._get_access_token(self.editor)
-        
+
         response1 = self.client.post(
             self.upload_url,
             {'file': self.test_jpeg},
             HTTP_AUTHORIZATION=f'Bearer {token}'
         )
         body1 = json.loads(response1.content)
-        url1 = body1['url']
-        
+        filename1 = body1['filename']
+
         # Reset file pointer
         from io import BytesIO
         from PIL import Image
@@ -997,17 +997,17 @@ class ImageUploadTests(TestCase):
         img.save(img2_file, format='JPEG')
         img2_file.seek(0)
         img2_file.name = 'test2.jpg'
-        
+
         response2 = self.client.post(
             self.upload_url,
             {'file': img2_file},
             HTTP_AUTHORIZATION=f'Bearer {token}'
         )
         body2 = json.loads(response2.content)
-        url2 = body2['url']
-        
-        # URLs should be different
-        self.assertNotEqual(url1, url2)
+        filename2 = body2['filename']
+
+        # Filenames should be different (due to uuid prefix)
+        self.assertNotEqual(filename1, filename2)
 
     def test_upload_image_missing_file_returns_error(self):
         """POST without file field returns error."""

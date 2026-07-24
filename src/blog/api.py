@@ -356,10 +356,11 @@ class BlogController:
     )
     def upload_image(self, request, file: UploadedFile = File(...)):
         """
-        Upload an image file and return its URL.
+        Upload an image file and return its filename.
         - Requires editor or admin role
         - Accepts JPEG, PNG, GIF, WebP
         - Max size: 10 MB
+        - Returns filename only; frontend generates fresh signed URLs on-demand
         """
         allowed = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
         if file.content_type not in allowed:
@@ -372,9 +373,8 @@ class BlogController:
         file_path = f"blog_images/{filename}"
 
         saved_path = default_storage.save(file_path, file)
-        url = default_storage.url(saved_path)
 
-        return {"url": url}
+        return {"filename": saved_path}
 
     @http_get(
         "/image-url/",
