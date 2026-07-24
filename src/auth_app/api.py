@@ -53,6 +53,37 @@ def _generate_unique_username(email):
     return username
 
 
+def _get_avatar_url(profile):
+    """Get a fresh signed URL for a user's avatar, or None if no avatar."""
+    if not profile or not profile.avatar:
+        return None
+
+    filename = profile.avatar.name
+    if settings.AWS_STORAGE_BUCKET_NAME:
+        try:
+            import boto3
+            s3_client = boto3.client(
+                's3',
+                endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME,
+                use_ssl=settings.AWS_S3_USE_SSL,
+            )
+            return s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                    'Key': filename,
+                },
+                ExpiresIn=86400  # 24 hours
+            )
+        except Exception:
+            return None
+    else:
+        return f"{settings.MEDIA_URL}{filename}"
+
+
 class AuthResponseSchema(Schema):
     """Response schema for auth endpoints."""
     status: str
@@ -449,7 +480,7 @@ def get_current_user(request):
     try:
         profile = user.profile
         role = profile.role
-        avatar_url = request.build_absolute_uri(profile.avatar.url) if profile.avatar else None
+        avatar_url = _get_avatar_url(profile)
     except UserProfile.DoesNotExist:
         role = 'reader'
         avatar_url = None
@@ -553,8 +584,51 @@ def upload_avatar(request, file: UploadedFile = File(...)):
     profile.avatar = filepath
     profile.save(update_fields=['avatar'])
 
-    avatar_url = request.build_absolute_uri(profile.avatar.url)
-    return {'avatar_url': avatar_url}
+    return {'filename': filepath}
+
+
+@router.get("/avatar-url")
+def get_avatar_url(request, filename: str):
+    """
+    Generate a fresh signed URL for an avatar image.
+    For private S3 buckets, returns a presigned URL with 24-hour expiration.
+    For local filesystem storage, returns the standard media URL.
+    """
+    from django.conf import settings
+    from ninja.errors import HttpError
+
+    if not filename or not filename.startswith('avatars/'):
+        raise HttpError(400, "Invalid avatar filename")
+
+    if settings.AWS_STORAGE_BUCKET_NAME:
+        try:
+            import boto3
+            from botocore.exceptions import ClientError
+
+            s3_client = boto3.client(
+                's3',
+                endpoint_url=settings.AWS_S3_ENDPOINT_URL,
+                aws_access_key_id=settings.AWS_ACCESS_KEY_ID,
+                aws_secret_access_key=settings.AWS_SECRET_ACCESS_KEY,
+                region_name=settings.AWS_S3_REGION_NAME,
+                use_ssl=settings.AWS_S3_USE_SSL,
+            )
+
+            url = s3_client.generate_presigned_url(
+                'get_object',
+                Params={
+                    'Bucket': settings.AWS_STORAGE_BUCKET_NAME,
+                    'Key': filename,
+                },
+                ExpiresIn=86400  # 24 hours
+            )
+
+            return {"url": url}
+        except Exception as e:
+            raise HttpError(500, f"Failed to generate avatar URL: {str(e)}")
+    else:
+        url = f"{settings.MEDIA_URL}{filename}"
+        return {"url": url}
 
 
 @router.post("/change-password", auth=JWTAuth())

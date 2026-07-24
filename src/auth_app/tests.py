@@ -1484,8 +1484,8 @@ class AuthAvatarUploadTests(TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
-    def test_upload_avatar_returns_avatar_url(self):
-        """Response includes the avatar_url."""
+    def test_upload_avatar_returns_filename(self):
+        """Response includes the filename."""
         token = self._get_access_token()
         response = self.client.post(
             self.avatar_url,
@@ -1493,8 +1493,8 @@ class AuthAvatarUploadTests(TestCase):
             HTTP_AUTHORIZATION=f'Bearer {token}'
         )
         body = json.loads(response.content)
-        self.assertIn('avatar_url', body)
-        self.assertIn('avatars/', body['avatar_url'])
+        self.assertIn('filename', body)
+        self.assertIn('avatars/', body['filename'])
 
     def test_upload_avatar_saves_to_profile(self):
         """After upload, the avatar path is saved to the user's profile."""
