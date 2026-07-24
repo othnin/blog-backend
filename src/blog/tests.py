@@ -1020,6 +1020,33 @@ class ImageUploadTests(TestCase):
         # Should fail (either 400 or 422)
         self.assertNotEqual(response.status_code, 200)
 
+
+class ImageUrlTests(TestCase):
+    """Tests for GET /api/blog/image-url/ — presigned URL generation."""
+
+    def setUp(self):
+        self.image_url_url = '/api/blog/image-url/'
+
+    def test_get_image_url_valid_key_returns_200(self):
+        """GET with valid blog_images/ key returns 200 + url in body."""
+        response = self.client.get(self.image_url_url, {'filename': 'blog_images/test.png'})
+        self.assertEqual(response.status_code, 200)
+        body = json.loads(response.content)
+        self.assertIn('url', body)
+        # In test (no bucket configured), should return a MEDIA_URL path
+        self.assertIsNotNone(body['url'])
+
+    def test_get_image_url_invalid_prefix_returns_400(self):
+        """GET with filename not prefixed by blog_images/ returns 400."""
+        response = self.client.get(self.image_url_url, {'filename': 'other_prefix/test.png'})
+        self.assertEqual(response.status_code, 400)
+
+    def test_get_image_url_missing_filename_returns_422(self):
+        """GET without filename parameter returns 422 (unprocessable entity)."""
+        response = self.client.get(self.image_url_url)
+        # Django Ninja returns 422 for missing required query parameters
+        self.assertEqual(response.status_code, 422)
+
 # ---------------------------------------------------------------------------
 # Tag Management Tests  (BLOG-011)
 # ---------------------------------------------------------------------------

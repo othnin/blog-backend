@@ -6,6 +6,7 @@ from typing import Optional, List
 from datetime import datetime
 from decimal import Decimal
 import json
+import re
 from helpers.storage import get_presigned_url_or_none
 
 
@@ -240,6 +241,34 @@ class RecipeListOut(BaseModel):
         if hasattr(v, 'all'):
             return list(v.all())
         return v
+
+    @field_validator('images', mode='before')
+    @classmethod
+    def resolve_image_urls(cls, v):
+        """Resolve stored image keys/URLs to fresh presigned URLs.
+        Handles bare keys (blog_images/xxx), stale presigned URLs, and full URLs.
+        Skips/filters falsy and non-string entries (defensive for historical null entries).
+        """
+        if not isinstance(v, list):
+            return []
+        result = []
+        for item in v:
+            if not item or not isinstance(item, str):
+                continue
+            if item.startswith('http://') or item.startswith('https://'):
+                match = re.search(r'(blog_images/[^?]+)', item)
+                if match:
+                    key = match.group(1)
+                    url = get_presigned_url_or_none(key)
+                    if url:
+                        result.append(url)
+                else:
+                    result.append(item)
+            else:
+                url = get_presigned_url_or_none(item)
+                if url:
+                    result.append(url)
+        return result
 
 
 class RecipeDetailOut(RecipeListOut):

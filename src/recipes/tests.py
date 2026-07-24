@@ -196,6 +196,59 @@ class RecipeCRUDTests(TestCase):
         self.assertEqual(len(resp.json()), 1)
 
 
+class RecipeImageResolutionTests(TestCase):
+    """Tests for recipe images serializer — resolution of bare keys and stale URLs."""
+
+    def setUp(self):
+        self.editor = make_user('editor1')
+        self.recipe = Recipe.objects.create(
+            author=self.editor,
+            title='Test Recipe',
+            slug='test-recipe',
+            status='published'
+        )
+
+    def test_recipe_images_bare_key_resolved_to_url(self):
+        """Recipe with bare blog_images/ key in images list resolves to a full URL in response."""
+        self.recipe.images = ['blog_images/test.png']
+        self.recipe.save()
+        resp = self.client.get(f'/api/recipes/{self.recipe.slug}/')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        # Resolved image should be a full URL (or MEDIA_URL path in test mode)
+        self.assertEqual(len(data['images']), 1)
+        self.assertIsNotNone(data['images'][0])
+        # Should not be the bare key anymore
+        self.assertNotEqual(data['images'][0], 'blog_images/test.png')
+
+    def test_recipe_images_null_entry_skipped(self):
+        """Recipe with null/non-string image entry is filtered out (defensive for historical undefined bug)."""
+        self.recipe.images = [None, 'blog_images/valid.png']
+        self.recipe.save()
+        resp = self.client.get(f'/api/recipes/{self.recipe.slug}/')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        # Only one image (the valid one)
+        self.assertEqual(len(data['images']), 1)
+
+    def test_recipe_images_stale_presigned_url_re_presigned(self):
+        """Recipe with stale presigned URL extracts key and re-presigns fresh."""
+        stale_url = 'https://t3.storageapi.dev/bucket/blog_images/old.gif?X-Amz-Date=20260723T000000Z&X-Amz-Expires=3600&X-Amz-Signature=old'
+        self.recipe.images = [stale_url]
+        self.recipe.save()
+        resp = self.client.get(f'/api/recipes/{self.recipe.slug}/')
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        # Should be resolved to a fresh URL (or MEDIA_URL in test)
+        self.assertEqual(len(data['images']), 1)
+        returned_url = data['images'][0]
+        # Should not be the stale URL
+        self.assertNotEqual(returned_url, stale_url)
+        # Should contain blog_images
+        self.assertIn('blog_images', returned_url)
+
+
+
 class RecipeRatingTests(TestCase):
     def setUp(self):
         self.editor = make_user('editor1')
