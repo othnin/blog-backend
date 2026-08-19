@@ -186,13 +186,18 @@ def hello(request):
     response=UserSchema,
     auth=helpers.api_auth_user_required)
 def me(request):
+    from helpers.storage import get_presigned_url_or_none
+
     user = request.user
     profile_data = None
     try:
         profile = user.profile
+        avatar_url = None
+        if profile.avatar:
+            avatar_url = get_presigned_url_or_none(str(profile.avatar))
         profile_data = {
             'role': profile.role,
-            'avatar': profile.avatar,
+            'avatar': avatar_url,
             'email_verified': profile.email_verified,
         }
     except Exception:
