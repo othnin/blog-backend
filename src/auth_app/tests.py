@@ -993,18 +993,18 @@ class JWTTokenTests(TestCase):
             )
         self.assertEqual(response.status_code, 401)
 
-    def test_protected_endpoint_without_token_returns_403(self):
-        """Unauthenticated requests to protected endpoints return 403 (IsAuthenticated permission)."""
+    def test_protected_endpoint_without_token_returns_401(self):
+        """Unauthenticated requests to protected endpoints return 401 (missing credentials)."""
         response = self.client.get('/api/blog/my-posts/')
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
-    def test_protected_endpoint_with_invalid_token_returns_403(self):
-        """Requests with a malformed Bearer token to protected endpoints return 403."""
+    def test_protected_endpoint_with_invalid_token_returns_401(self):
+        """Requests with a malformed Bearer token to protected endpoints return 401."""
         response = self.client.get(
             '/api/blog/my-posts/',
             HTTP_AUTHORIZATION='Bearer not.a.real.token'
         )
-        self.assertEqual(response.status_code, 403)
+        self.assertEqual(response.status_code, 401)
 
     def test_login_response_includes_username(self):
         """Successful login response includes the username field."""
