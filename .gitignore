@@ -123,6 +123,8 @@ celerybeat.pid
 *.sage.py
 
 # Environments
+.env.railway.backend
+.env.railway.frontend
 .env.railway
 .env
 .venv
