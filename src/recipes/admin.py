@@ -1,4 +1,5 @@
 from django.contrib import admin
+from home.blog_admin import blog_admin_site
 from .models import Recipe, RecipeIngredient, RecipeInstruction, RecipeRating, DietaryLabel
 
 
@@ -12,7 +13,6 @@ class RecipeInstructionInline(admin.TabularInline):
     extra = 1
 
 
-@admin.register(Recipe)
 class RecipeAdmin(admin.ModelAdmin):
     list_display = ['title', 'author', 'status', 'cuisine_type', 'course', 'created_at']
     list_filter = ['status', 'cuisine_type', 'course', 'dietary_labels']
@@ -21,13 +21,17 @@ class RecipeAdmin(admin.ModelAdmin):
     inlines = [RecipeIngredientInline, RecipeInstructionInline]
 
 
-@admin.register(DietaryLabel)
 class DietaryLabelAdmin(admin.ModelAdmin):
     list_display = ['name', 'slug']
     prepopulated_fields = {'slug': ('name',)}
 
 
-@admin.register(RecipeRating)
 class RecipeRatingAdmin(admin.ModelAdmin):
     list_display = ['recipe', 'user', 'score']
     list_filter = ['score']
+
+
+# Register with custom admin site
+blog_admin_site.register(Recipe, RecipeAdmin)
+blog_admin_site.register(DietaryLabel, DietaryLabelAdmin)
+blog_admin_site.register(RecipeRating, RecipeRatingAdmin)

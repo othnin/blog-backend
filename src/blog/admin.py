@@ -1,22 +1,20 @@
 from django.contrib import admin
+from home.blog_admin import blog_admin_site
 from .models import Category, Tag, BlogPost
 
 
-@admin.register(Category)
 class CategoryAdmin(admin.ModelAdmin):
     list_display = ('name', 'slug', 'created_at')
     search_fields = ('name',)
     prepopulated_fields = {'slug': ('name',)}
 
 
-@admin.register(Tag)
 class TagAdmin(admin.ModelAdmin):
     list_display = ('name', 'slug', 'created_at')
     search_fields = ('name',)
     prepopulated_fields = {'slug': ('name',)}
 
 
-@admin.register(BlogPost)
 class BlogPostAdmin(admin.ModelAdmin):
     list_display = ('title', 'author', 'status', 'view_count', 'published_at', 'created_at')
     list_filter = ('status', 'created_at', 'published_at')
@@ -40,3 +38,9 @@ class BlogPostAdmin(admin.ModelAdmin):
             'classes': ('collapse',)
         }),
     )
+
+
+# Register with custom admin site
+blog_admin_site.register(BlogPost, BlogPostAdmin)
+blog_admin_site.register(Category, CategoryAdmin)
+blog_admin_site.register(Tag, TagAdmin)
