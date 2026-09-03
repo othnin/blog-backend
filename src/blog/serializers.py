@@ -371,6 +371,29 @@ class AdminDashboardOut(BaseModel):
     total_views: int
     total_categories: int
     total_comments: int
+    new_users_this_month: int = 0
+
+
+class TimeSeriesPointOut(BaseModel):
+    period: str
+    count: int
+
+
+class TopPostOut(BaseModel):
+    id: int
+    title: str
+    slug: str
+    author_username: str = ''
+    like_count: int
+    view_count: int
+
+
+class ActiveUserOut(BaseModel):
+    id: int
+    username: str
+    post_count: int
+    comment_count: int
+    total_activity: int
 
 
 class AdminRecipeListOut(BaseModel):

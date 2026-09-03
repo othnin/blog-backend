@@ -1427,7 +1427,8 @@ class AdminDashboardTests(TestCase):
         r = self.admin_client.get('/api/admin/dashboard/')
         data = json.loads(r.content)
         for field in ['total_users', 'total_posts', 'published_posts', 'draft_posts',
-                      'total_likes', 'total_views', 'total_categories', 'total_comments']:
+                      'total_likes', 'total_views', 'total_categories', 'total_comments',
+                      'new_users_this_month']:
             self.assertIn(field, data)
 
     def test_dashboard_counts_are_accurate(self):
@@ -1449,6 +1450,189 @@ class AdminDashboardTests(TestCase):
 
     def test_unauthenticated_cannot_access_dashboard(self):
         r = Client().get('/api/admin/dashboard/')
+        self.assertEqual(r.status_code, 401)
+
+    def test_dashboard_includes_new_users_this_month(self):
+        r = self.admin_client.get('/api/admin/dashboard/')
+        data = json.loads(r.content)
+        # Should have 3 users (all created today by setUp), so all are this month
+        self.assertEqual(data['new_users_this_month'], 3)
+
+
+class AdminUserGrowthAnalyticsTests(TestCase):
+    """Tests for GET /api/admin/analytics/user-growth/"""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_admin_can_access_user_growth(self):
+        r = self.admin_client.get('/api/admin/analytics/user-growth/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_user_growth_returns_expected_shape(self):
+        r = self.admin_client.get('/api/admin/analytics/user-growth/')
+        data = json.loads(r.content)
+        self.assertIsInstance(data, list)
+        if len(data) > 0:
+            self.assertIn('period', data[0])
+            self.assertIn('count', data[0])
+            # Should be in format YYYY-MM
+            self.assertRegex(data[0]['period'], r'^\d{4}-\d{2}$')
+
+    def test_user_growth_zero_filled(self):
+        # Should return exactly 12 months with zero-filling
+        r = self.admin_client.get('/api/admin/analytics/user-growth/')
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 12)
+
+    def test_non_admin_cannot_access_user_growth(self):
+        r = jwt_client(self.editor).get('/api/admin/analytics/user-growth/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_unauthenticated_cannot_access_user_growth(self):
+        r = Client().get('/api/admin/analytics/user-growth/')
+        self.assertEqual(r.status_code, 401)
+
+
+class AdminPostTrendAnalyticsTests(TestCase):
+    """Tests for GET /api/admin/analytics/post-trend/"""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_admin_can_access_post_trend(self):
+        r = self.admin_client.get('/api/admin/analytics/post-trend/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_post_trend_returns_expected_shape(self):
+        make_post('Published Post', self.editor, status='published')
+        r = self.admin_client.get('/api/admin/analytics/post-trend/')
+        data = json.loads(r.content)
+        self.assertIsInstance(data, list)
+        self.assertEqual(len(data), 12)
+        if any(item['count'] > 0 for item in data):
+            found = any(item['count'] > 0 for item in data)
+            self.assertTrue(found, "Should have at least one month with posts")
+
+    def test_post_trend_excludes_drafts(self):
+        make_post('Draft Post', self.editor, status='draft')
+        r = self.admin_client.get('/api/admin/analytics/post-trend/')
+        data = json.loads(r.content)
+        total_count = sum(item['count'] for item in data)
+        self.assertEqual(total_count, 0, "Draft posts should not be counted")
+
+    def test_non_admin_cannot_access_post_trend(self):
+        r = jwt_client(self.editor).get('/api/admin/analytics/post-trend/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_unauthenticated_cannot_access_post_trend(self):
+        r = Client().get('/api/admin/analytics/post-trend/')
+        self.assertEqual(r.status_code, 401)
+
+
+class AdminTopPostsAnalyticsTests(TestCase):
+    """Tests for GET /api/admin/analytics/top-posts/"""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_admin_can_access_top_posts(self):
+        r = self.admin_client.get('/api/admin/analytics/top-posts/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_top_posts_returns_list(self):
+        r = self.admin_client.get('/api/admin/analytics/top-posts/')
+        data = json.loads(r.content)
+        self.assertIsInstance(data, list)
+
+    def test_top_posts_excludes_unpublished(self):
+        make_post('Draft Post', self.editor, status='draft')
+        make_post('Archived Post', self.editor, status='archived')
+        r = self.admin_client.get('/api/admin/analytics/top-posts/')
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 0)
+
+    def test_top_posts_orders_by_like_count(self):
+        post1 = make_post('Post 1', self.editor, status='published')
+        post2 = make_post('Post 2', self.editor, status='published')
+        # Manually set like_count to different values
+        post1.like_count = 10
+        post1.save()
+        post2.like_count = 20
+        post2.save()
+
+        r = self.admin_client.get('/api/admin/analytics/top-posts/')
+        data = json.loads(r.content)
+        self.assertEqual(len(data), 2)
+        self.assertEqual(data[0]['id'], post2.id)
+        self.assertEqual(data[1]['id'], post1.id)
+
+    def test_non_admin_cannot_access_top_posts(self):
+        r = jwt_client(self.editor).get('/api/admin/analytics/top-posts/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_unauthenticated_cannot_access_top_posts(self):
+        r = Client().get('/api/admin/analytics/top-posts/')
+        self.assertEqual(r.status_code, 401)
+
+
+class AdminActiveUsersAnalyticsTests(TestCase):
+    """Tests for GET /api/admin/analytics/active-users/"""
+
+    def setUp(self):
+        self.admin = make_user('admin_user', 'admin@example.com', role='admin')
+        self.editor = make_user('editor_user', 'editor@example.com', role='editor')
+        self.reader = make_user('reader_user', 'reader@example.com', role='reader')
+        self.admin_client = jwt_client(self.admin)
+
+    def test_admin_can_access_active_users(self):
+        r = self.admin_client.get('/api/admin/analytics/active-users/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_active_users_returns_list(self):
+        r = self.admin_client.get('/api/admin/analytics/active-users/')
+        data = json.loads(r.content)
+        self.assertIsInstance(data, list)
+
+    def test_active_users_counts_posts_and_comments(self):
+        post = make_post('Test Post', self.editor, status='published')
+        comment = Comment.objects.create(post=post, author=self.reader, content_json='{"blocks":[]}')
+
+        r = self.admin_client.get('/api/admin/analytics/active-users/')
+        data = json.loads(r.content)
+
+        # Find editor and reader in results
+        editor_data = next((u for u in data if u['username'] == self.editor.username), None)
+        reader_data = next((u for u in data if u['username'] == self.reader.username), None)
+
+        self.assertIsNotNone(editor_data)
+        self.assertIsNotNone(reader_data)
+        self.assertEqual(editor_data['post_count'], 1)
+        self.assertEqual(reader_data['comment_count'], 1)
+
+    def test_active_users_excludes_deleted_comments(self):
+        post = make_post('Test Post', self.editor, status='published')
+        comment = Comment.objects.create(post=post, author=self.reader, content_json='{"blocks":[]}', is_deleted=True)
+
+        r = self.admin_client.get('/api/admin/analytics/active-users/')
+        data = json.loads(r.content)
+
+        reader_data = next((u for u in data if u['username'] == self.reader.username), None)
+        if reader_data:
+            self.assertEqual(reader_data['comment_count'], 0)
+
+    def test_non_admin_cannot_access_active_users(self):
+        r = jwt_client(self.editor).get('/api/admin/analytics/active-users/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_unauthenticated_cannot_access_active_users(self):
+        r = Client().get('/api/admin/analytics/active-users/')
         self.assertEqual(r.status_code, 401)
 
 

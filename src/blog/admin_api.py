@@ -13,8 +13,12 @@ from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.utils.text import slugify
 from django.conf import settings
-from django.db.models import Sum
+from django.db.models import Sum, Count, F, Q
+from django.db.models.functions import TruncMonth
+from django.utils import timezone
 from typing import List, Optional
+from datetime import datetime, timedelta
+from calendar import monthrange
 from .permissions import IsAdmin
 from .models import BlogPost, Category, Comment, Tag
 from recipes.models import Recipe
@@ -37,6 +41,9 @@ from .serializers import (
     AdminTagOut,
     AdminTagCreateIn,
     AdminTagUpdateIn,
+    TimeSeriesPointOut,
+    TopPostOut,
+    ActiveUserOut,
 )
 
 logger = logging.getLogger('blog')
@@ -111,6 +118,12 @@ class AdminController:
         """Return aggregate site metrics."""
         total_likes = BlogPost.objects.aggregate(total=Sum('like_count'))['total'] or 0
         total_views = BlogPost.objects.aggregate(total=Sum('view_count'))['total'] or 0
+
+        # New users this month
+        now = timezone.now()
+        start_of_month = now.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+        new_users_this_month = User.objects.filter(date_joined__gte=start_of_month).count()
+
         return AdminDashboardOut(
             total_users=User.objects.count(),
             total_posts=BlogPost.objects.count(),
@@ -120,7 +133,112 @@ class AdminController:
             total_views=total_views,
             total_categories=Category.objects.count(),
             total_comments=Comment.objects.filter(is_deleted=False).count(),
+            new_users_this_month=new_users_this_month,
         )
+
+    # ── Analytics ──────────────────────────────────────────────────────────────
+
+    def _get_month_range(self, months: int = 12):
+        """Get start date and list of months (YYYY-MM) for a time range."""
+        now = timezone.now()
+        start_date = now - timedelta(days=now.day + 30 * (months - 1))
+        start_date = start_date.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+
+        month_list = []
+        current = start_date
+        while current <= now:
+            month_list.append(current.strftime('%Y-%m'))
+            # Move to first day of next month
+            if current.month == 12:
+                current = current.replace(year=current.year + 1, month=1)
+            else:
+                current = current.replace(month=current.month + 1)
+
+        return start_date, month_list
+
+    @http_get("/analytics/user-growth/", response=List[TimeSeriesPointOut])
+    def get_user_growth(self, months: int = 12) -> List[TimeSeriesPointOut]:
+        """Return user signup trend over time (months)."""
+        start_date, month_list = self._get_month_range(months)
+
+        qs = (User.objects
+              .filter(date_joined__gte=start_date)
+              .annotate(period=TruncMonth('date_joined'))
+              .values('period')
+              .annotate(count=Count('id'))
+              .order_by('period'))
+
+        # Create a dict of month -> count
+        data_dict = {item['period'].strftime('%Y-%m'): item['count'] for item in qs}
+
+        # Return zero-filled month series
+        return [
+            TimeSeriesPointOut(period=month, count=data_dict.get(month, 0))
+            for month in month_list
+        ]
+
+    @http_get("/analytics/post-trend/", response=List[TimeSeriesPointOut])
+    def get_post_trend(self, months: int = 12) -> List[TimeSeriesPointOut]:
+        """Return post publishing trend over time (months)."""
+        start_date, month_list = self._get_month_range(months)
+
+        qs = (BlogPost.objects
+              .filter(status='published', published_at__gte=start_date)
+              .annotate(period=TruncMonth('published_at'))
+              .values('period')
+              .annotate(count=Count('id'))
+              .order_by('period'))
+
+        # Create a dict of month -> count
+        data_dict = {item['period'].strftime('%Y-%m'): item['count'] for item in qs}
+
+        # Return zero-filled month series
+        return [
+            TimeSeriesPointOut(period=month, count=data_dict.get(month, 0))
+            for month in month_list
+        ]
+
+    @http_get("/analytics/top-posts/", response=List[TopPostOut])
+    def get_top_posts(self) -> List[TopPostOut]:
+        """Return top 10 most-liked published posts."""
+        posts = (BlogPost.objects
+                 .select_related('author')
+                 .filter(status='published')
+                 .order_by('-like_count')[:10])
+
+        result = []
+        for post in posts:
+            result.append(TopPostOut(
+                id=post.id,
+                title=post.title,
+                slug=post.slug,
+                author_username=post.author.username,
+                like_count=post.like_count,
+                view_count=post.view_count,
+            ))
+        return result
+
+    @http_get("/analytics/active-users/", response=List[ActiveUserOut])
+    def get_active_users(self) -> List[ActiveUserOut]:
+        """Return top 10 most active users (by posts + comments)."""
+        users = (User.objects
+                 .annotate(
+                     post_count=Count('blog_posts', distinct=True),
+                     comment_count=Count('comments', filter=Q(comments__is_deleted=False), distinct=True)
+                 )
+                 .annotate(total_activity=F('post_count') + F('comment_count'))
+                 .order_by('-total_activity')[:10])
+
+        result = []
+        for user in users:
+            result.append(ActiveUserOut(
+                id=user.id,
+                username=user.username,
+                post_count=user.post_count,
+                comment_count=user.comment_count,
+                total_activity=user.total_activity,
+            ))
+        return result
 
     # ── User Management ────────────────────────────────────────────────────────
 
