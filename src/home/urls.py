@@ -22,7 +22,7 @@ from .api import api
 from .blog_admin import blog_admin_site
 
 urlpatterns = [
-    path("api/django-admin/", blog_admin_site.urls),
+    path("django-admin/", blog_admin_site.urls),
     path("api/", api.urls)
 ]
 
