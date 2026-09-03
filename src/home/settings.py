@@ -45,6 +45,7 @@ INSTALLED_APPS = [
     "django.contrib.staticfiles",
     # third party
     "corsheaders",
+    "csp",
     "ninja_extra",
     "ninja_jwt",
     "ninja_jwt.token_blacklist",
@@ -56,6 +57,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "csp.middleware.CSPMiddleware",
     "helpers.middleware.GlobalRateLimitMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
@@ -85,6 +87,21 @@ else:
 
 CORS_ALLOW_CREDENTIALS = True
 
+# Security Headers (Production)
+# These are only applied when DEBUG=False
+if not DEBUG:
+    SECURE_SSL_REDIRECT = True
+    SECURE_HSTS_SECONDS = 31536000  # 1 year
+    SECURE_HSTS_INCLUDE_SUBDOMAINS = True
+    SECURE_HSTS_PRELOAD = True
+
+    # Trust Railway's SSL termination (X-Forwarded-Proto header)
+    SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+    SECURE_CONTENT_TYPE_NOSNIFF = True
+    SECURE_BROWSER_XSS_FILTER = True
+    SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
+    X_FRAME_OPTIONS = "DENY"
 
 TEMPLATES = [
     {
@@ -265,6 +282,15 @@ RATE_LIMIT_ENABLED = config("RATE_LIMIT_ENABLED", cast=bool, default=not DEBUG)
 # Number of trusted proxies in front of Django. Railway's edge is a single hop (default=1).
 # If a CDN or other proxy is added in front of Railway, increase this value.
 NUM_TRUSTED_PROXIES = config("NUM_TRUSTED_PROXIES", cast=int, default=1)
+
+# Content Security Policy
+CSP_DEFAULT_SRC = ("'self'",)
+CSP_SCRIPT_SRC = ("'self'",)
+CSP_STYLE_SRC = ("'self'", "'unsafe-inline'")
+CSP_IMG_SRC = ("'self'", "data:", "https:")
+CSP_FONT_SRC = ("'self'",)
+CSP_CONNECT_SRC = ("'self'",)
+CSP_FRAME_ANCESTORS = ("'none'",)
 
 # Logging — console in dev, console + rotating file in production
 _log_handlers = ['console'] if DEBUG else ['console', 'file']
