@@ -56,6 +56,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "helpers.middleware.GlobalRateLimitMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
     "corsheaders.middleware.CorsMiddleware",
@@ -248,8 +249,22 @@ else:
         }
     }
 
+# Warn if running in production without Redis (rate limits won't be shared across instances)
+if not DEBUG and not CACHE_URL:
+    import logging
+    logging.getLogger("django").warning(
+        "CACHE_URL is not set; falling back to per-process LocMemCache. "
+        "Rate-limit state will NOT be shared across multiple Railway "
+        "instances or survive restarts. Set CACHE_URL to a Redis URL in "
+        "production."
+    )
+
 # Rate limiting — disabled by default in DEBUG mode (development/tests); enabled in production
 RATE_LIMIT_ENABLED = config("RATE_LIMIT_ENABLED", cast=bool, default=not DEBUG)
+
+# Number of trusted proxies in front of Django. Railway's edge is a single hop (default=1).
+# If a CDN or other proxy is added in front of Railway, increase this value.
+NUM_TRUSTED_PROXIES = config("NUM_TRUSTED_PROXIES", cast=int, default=1)
 
 # Logging — console in dev, console + rotating file in production
 _log_handlers = ['console'] if DEBUG else ['console', 'file']

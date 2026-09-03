@@ -19,16 +19,27 @@ from ninja.errors import HttpError
 
 
 def _get_ip(request):
-    """Return the real client IP, respecting X-Forwarded-For."""
-    xff = request.META.get("HTTP_X_FORWARDED_FOR", "")
-    if xff:
-        return xff.split(",")[0].strip()
-    return request.META.get("REMOTE_ADDR", "0.0.0.0")
+    """Return the real client IP by parsing X-Forwarded-For.
+
+    Takes the rightmost (client-closest) IP from X-Forwarded-For, respecting
+    NUM_TRUSTED_PROXIES. Railway's edge is a single hop, so NUM_TRUSTED_PROXIES=1
+    by default; rightmost IP is most trustworthy since it's added by the closest
+    trusted proxy (Railway's edge) to the actual client.
+    """
+    xff = request.META.get("HTTP_X_FORWARDED_FOR")
+    remote_addr = request.META.get("REMOTE_ADDR", "0.0.0.0")
+    if not xff:
+        return remote_addr
+    addrs = [a.strip() for a in xff.split(",") if a.strip()]
+    if not addrs:
+        return remote_addr
+    num_proxies = getattr(settings, "NUM_TRUSTED_PROXIES", 1)
+    return addrs[-min(num_proxies, len(addrs))]
 
 
 def check_rate_limit(request, key, max_requests, period, identifier=None):
     """
-    Fixed-window rate limiter.
+    Fixed-window rate limiter using atomic cache operations.
 
     Args:
         request:      Django HttpRequest (used to derive IP when identifier is None)
@@ -47,27 +58,22 @@ def check_rate_limit(request, key, max_requests, period, identifier=None):
         identifier = _get_ip(request)
 
     cache_key = f"rl:{key}:{identifier}"
-    now = int(time.time())
 
-    data = cache.get(cache_key)
-
-    if data is None:
-        cache.set(cache_key, {"count": 1, "window_start": now}, timeout=period)
+    # Atomic set-if-absent: opens a new window (first request)
+    if cache.add(cache_key, 1, timeout=period):
         return
 
-    elapsed = now - data["window_start"]
-
-    if elapsed >= period:
-        # Window expired — open a fresh one
-        cache.set(cache_key, {"count": 1, "window_start": now}, timeout=period)
+    # Window exists; atomically increment request count
+    try:
+        count = cache.incr(cache_key)
+    except ValueError:
+        # Rare edge case: key expired between add() and incr() (at window boundary).
+        # Reopen the window and allow this request through.
+        cache.add(cache_key, 1, timeout=period)
         return
 
-    if data["count"] >= max_requests:
-        retry_after = period - elapsed
+    if count > max_requests:
         raise HttpError(
             429,
-            f"Rate limit exceeded. Try again in {retry_after} seconds.",
+            f"Rate limit exceeded. Try again in {period} seconds.",
         )
-
-    data["count"] += 1
-    cache.set(cache_key, data, timeout=period - elapsed)
