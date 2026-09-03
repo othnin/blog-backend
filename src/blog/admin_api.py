@@ -157,12 +157,24 @@ class AdminController:
         return start_date, month_list
 
     @http_get("/analytics/user-growth/", response=List[TimeSeriesPointOut])
-    def get_user_growth(self, months: int = 12) -> List[TimeSeriesPointOut]:
-        """Return user signup trend over time (months)."""
-        start_date, month_list = self._get_month_range(months)
+    def get_user_growth(self, months: int = 12, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[TimeSeriesPointOut]:
+        """Return user signup trend over time (months). Supports custom date range via start_date/end_date (YYYY-MM-DD)."""
+        if start_date and end_date:
+            try:
+                start = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                end = datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                # Extend end to end of day
+                end = end + timedelta(days=1)
+            except ValueError:
+                # Invalid date format, fall back to months
+                start, month_list = self._get_month_range(months)
+                end = timezone.now()
+        else:
+            start, month_list = self._get_month_range(months)
+            end = timezone.now()
 
         qs = (User.objects
-              .filter(date_joined__gte=start_date)
+              .filter(date_joined__gte=start, date_joined__lte=end)
               .annotate(period=TruncMonth('date_joined'))
               .values('period')
               .annotate(count=Count('id'))
@@ -171,6 +183,17 @@ class AdminController:
         # Create a dict of month -> count
         data_dict = {item['period'].strftime('%Y-%m'): item['count'] for item in qs}
 
+        # If custom date range, generate month list for that range
+        if start_date and end_date:
+            month_list = []
+            current = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            while current <= end:
+                month_list.append(current.strftime('%Y-%m'))
+                if current.month == 12:
+                    current = current.replace(year=current.year + 1, month=1)
+                else:
+                    current = current.replace(month=current.month + 1)
+
         # Return zero-filled month series
         return [
             TimeSeriesPointOut(period=month, count=data_dict.get(month, 0))
@@ -178,12 +201,24 @@ class AdminController:
         ]
 
     @http_get("/analytics/post-trend/", response=List[TimeSeriesPointOut])
-    def get_post_trend(self, months: int = 12) -> List[TimeSeriesPointOut]:
-        """Return post publishing trend over time (months)."""
-        start_date, month_list = self._get_month_range(months)
+    def get_post_trend(self, months: int = 12, start_date: Optional[str] = None, end_date: Optional[str] = None) -> List[TimeSeriesPointOut]:
+        """Return post publishing trend over time (months). Supports custom date range via start_date/end_date (YYYY-MM-DD)."""
+        if start_date and end_date:
+            try:
+                start = datetime.strptime(start_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                end = datetime.strptime(end_date, '%Y-%m-%d').replace(tzinfo=timezone.utc)
+                # Extend end to end of day
+                end = end + timedelta(days=1)
+            except ValueError:
+                # Invalid date format, fall back to months
+                start, month_list = self._get_month_range(months)
+                end = timezone.now()
+        else:
+            start, month_list = self._get_month_range(months)
+            end = timezone.now()
 
         qs = (BlogPost.objects
-              .filter(status='published', published_at__gte=start_date)
+              .filter(status='published', published_at__gte=start, published_at__lte=end)
               .annotate(period=TruncMonth('published_at'))
               .values('period')
               .annotate(count=Count('id'))
@@ -191,6 +226,17 @@ class AdminController:
 
         # Create a dict of month -> count
         data_dict = {item['period'].strftime('%Y-%m'): item['count'] for item in qs}
+
+        # If custom date range, generate month list for that range
+        if start_date and end_date:
+            month_list = []
+            current = start.replace(day=1, hour=0, minute=0, second=0, microsecond=0)
+            while current <= end:
+                month_list.append(current.strftime('%Y-%m'))
+                if current.month == 12:
+                    current = current.replace(year=current.year + 1, month=1)
+                else:
+                    current = current.replace(month=current.month + 1)
 
         # Return zero-filled month series
         return [
@@ -239,6 +285,71 @@ class AdminController:
                 total_activity=user.total_activity,
             ))
         return result
+
+    @http_get("/search/", response=List[dict])
+    def global_search(self, q: str = "") -> List[dict]:
+        """Search users, posts, and comments. Returns merged results with type indicators."""
+        results = []
+
+        if not q or len(q) < 2:
+            return results
+
+        # Search users (username, email)
+        users = User.objects.filter(
+            Q(username__icontains=q) | Q(email__icontains=q)
+        ).order_by('username')[:20]
+
+        for user in users:
+            results.append({
+                'type': 'user',
+                'id': user.id,
+                'name': user.username,
+                'email': user.email,
+                'description': f'{user.email}',
+            })
+
+        # Search posts (title, slug, author)
+        posts = (BlogPost.objects
+                 .select_related('author')
+                 .filter(
+                     Q(title__icontains=q) | Q(slug__icontains=q) | Q(author__username__icontains=q)
+                 )
+                 .order_by('-created_at')[:20])
+
+        for post in posts:
+            results.append({
+                'type': 'post',
+                'id': post.id,
+                'name': post.title,
+                'slug': post.slug,
+                'author': post.author.username,
+                'status': post.status,
+                'description': f'by {post.author.username} ({post.status})',
+            })
+
+        # Search comments (author, content preview)
+        comments = (Comment.objects
+                    .select_related('author')
+                    .filter(
+                        Q(author__username__icontains=q),
+                        is_deleted=False
+                    )
+                    .order_by('-created_at')[:20])
+
+        for comment in comments:
+            results.append({
+                'type': 'comment',
+                'id': comment.id,
+                'author': comment.author.username,
+                'post_id': comment.post_id,
+                'description': f'by {comment.author.username} on post {comment.post_id}',
+            })
+
+        # Sort by type (users first, then posts, then comments)
+        type_order = {'user': 0, 'post': 1, 'comment': 2}
+        results.sort(key=lambda x: (type_order[x['type']], x.get('name', '')))
+
+        return results[:50]
 
     # ── User Management ────────────────────────────────────────────────────────
 
