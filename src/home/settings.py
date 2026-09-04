@@ -57,6 +57,7 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    "helpers.middleware.SSLRedirectMiddleware",
     "csp.middleware.CSPMiddleware",
     "helpers.middleware.GlobalRateLimitMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
@@ -89,8 +90,9 @@ CORS_ALLOW_CREDENTIALS = True
 
 # Security Headers (Production)
 # These are only applied when DEBUG=False
+# Note: SECURE_SSL_REDIRECT is handled by custom middleware to exempt /api/health/
 if not DEBUG:
-    SECURE_SSL_REDIRECT = True
+    SECURE_SSL_REDIRECT = False  # Handled by custom middleware instead
     SECURE_HSTS_SECONDS = 31536000  # 1 year
     SECURE_HSTS_INCLUDE_SUBDOMAINS = True
     SECURE_HSTS_PRELOAD = True

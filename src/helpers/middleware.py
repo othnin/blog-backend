@@ -2,6 +2,7 @@
 import time
 from django.http import JsonResponse
 from django.core.cache import cache
+from django.conf import settings
 from ninja.errors import HttpError
 from helpers.rate_limit import check_rate_limit, get_client_ip
 
@@ -99,3 +100,29 @@ class GlobalRateLimitMiddleware:
             )
         except Exception:
             pass
+
+
+class SSLRedirectMiddleware:
+    """
+    Force HTTPS in production, but exempt certain paths (like /api/health/).
+    This allows Railway's healthcheck probe (which uses HTTP) to work while still
+    enforcing HTTPS for all other requests.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        # Exempt paths that should allow plain HTTP
+        exempt_paths = ['/api/health/']
+
+        if not settings.DEBUG and request.scheme == 'http':
+            # Check if this path is exempt from SSL redirect
+            if not any(request.path == path for path in exempt_paths):
+                # Redirect to HTTPS
+                url = request.build_absolute_uri()
+                secure_url = url.replace('http://', 'https://', 1)
+                from django.http import HttpResponsePermanentRedirect
+                return HttpResponsePermanentRedirect(secure_url)
+
+        return self.get_response(request)
