@@ -18,7 +18,7 @@ from django.core.cache import cache
 from ninja.errors import HttpError
 
 
-def _get_ip(request):
+def get_client_ip(request):
     """Return the real client IP by parsing X-Forwarded-For.
 
     Takes the rightmost (client-closest) IP from X-Forwarded-For, respecting
@@ -55,7 +55,7 @@ def check_rate_limit(request, key, max_requests, period, identifier=None):
         return
 
     if identifier is None:
-        identifier = _get_ip(request)
+        identifier = get_client_ip(request)
 
     cache_key = f"rl:{key}:{identifier}"
 

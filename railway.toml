@@ -2,8 +2,13 @@
 builder = "DOCKERFILE"
 dockerfilePath = "./Dockerfile"
 watchPatterns = [
-    "requirements.txt", 
-    "src/**", 
+    "requirements.txt",
+    "src/**",
     "railway.toml",
     "Dockerfile",
 ]
+
+[deploy]
+healthcheckPath = "/api/health/"
+healthcheckTimeout = 30
+restartPolicyType = "ON_FAILURE"

@@ -276,6 +276,20 @@ if not DEBUG and not CACHE_URL:
         "production."
     )
 
+# Sentry Error Tracking
+SENTRY_DSN = config("SENTRY_DSN", default="")
+if SENTRY_DSN:
+    import sentry_sdk
+    from sentry_sdk.integrations.django import DjangoIntegration
+    sentry_sdk.init(
+        dsn=SENTRY_DSN,
+        integrations=[DjangoIntegration()],
+        traces_sample_rate=0.1,
+        send_default_pii=False,
+        environment=config("SENTRY_ENVIRONMENT", default="production" if not DEBUG else "development"),
+        release=config("RAILWAY_GIT_COMMIT_SHA", default=None),
+    )
+
 # Rate limiting — disabled by default in DEBUG mode (development/tests); enabled in production
 RATE_LIMIT_ENABLED = config("RATE_LIMIT_ENABLED", cast=bool, default=not DEBUG)
 

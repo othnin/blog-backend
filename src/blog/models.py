@@ -256,3 +256,69 @@ class Comment(models.Model):
         if self.post_id:
             return f'Comment {self.id} by {self.author_id} on post {self.post_id}'
         return f'Comment {self.id} by {self.author_id} on recipe {self.recipe_id}'
+
+
+class SecurityEvent(models.Model):
+    """
+    Searchable security and audit event log.
+    Tracks permission denials, rate limiting, service failures, and elevated error rates.
+    """
+    EVENT_TYPE_CHOICES = [
+        ('permission_denied', 'Permission Denied'),
+        ('rate_limited', 'Rate Limited'),
+        ('email_send_failed', 'Email Send Failed'),
+        ('storage_failed', 'Storage Failed'),
+        ('elevated_error_rate', 'Elevated Error Rate'),
+    ]
+
+    SEVERITY_CHOICES = [
+        ('info', 'Info'),
+        ('warning', 'Warning'),
+        ('critical', 'Critical'),
+    ]
+
+    event_type = models.CharField(
+        max_length=50,
+        choices=EVENT_TYPE_CHOICES,
+        db_index=True,
+    )
+    severity = models.CharField(
+        max_length=20,
+        choices=SEVERITY_CHOICES,
+        default='warning',
+    )
+    ip_address = models.GenericIPAddressField(
+        db_index=True,
+        help_text='IP address of the client',
+    )
+    user = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='security_events',
+    )
+    message = models.TextField(
+        help_text='Human-readable message describing the event',
+    )
+    details = models.JSONField(
+        default=dict,
+        blank=True,
+        help_text='Additional structured data (status code, rate limit threshold, etc.)',
+    )
+    created_at = models.DateTimeField(
+        auto_now_add=True,
+        db_index=True,
+    )
+
+    class Meta:
+        ordering = ['-created_at']
+        verbose_name = 'Security Event'
+        verbose_name_plural = 'Security Events'
+        indexes = [
+            models.Index(fields=['event_type', '-created_at']),
+            models.Index(fields=['ip_address', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f'{self.event_type} from {self.ip_address} at {self.created_at}'

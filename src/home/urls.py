@@ -20,9 +20,11 @@ from django.conf.urls.static import static
 
 from .api import api
 from .blog_admin import blog_admin_site
+from .views import health_check
 
 urlpatterns = [
     path("django-admin/", blog_admin_site.urls),
+    path("api/health/", health_check),
     path("api/", api.urls)
 ]
 

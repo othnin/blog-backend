@@ -2139,3 +2139,149 @@ class AdminTagManagementTests(TestCase):
     def test_unauthenticated_cannot_access(self):
         r = Client().get('/api/admin/tags/')
         self.assertEqual(r.status_code, 401)
+
+# ---------------------------------------------------------------------------
+# Health Check Tests
+# ---------------------------------------------------------------------------
+
+class HealthCheckTests(TestCase):
+    """Tests for GET /api/health/ health check endpoint."""
+
+    def test_health_check_success(self):
+        """Health check returns 200 with ok status when database and cache are healthy."""
+        response = Client().get('/api/health/')
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertEqual(data['status'], 'ok')
+        self.assertTrue(data['checks']['database'])
+        self.assertTrue(data['checks']['cache'])
+
+    def test_health_check_not_rate_limited(self):
+        """Health check endpoint is exempt from rate limiting."""
+        c = Client()
+        # Make many requests to the health endpoint (should not be rate limited)
+        for _ in range(150):
+            response = c.get('/api/health/')
+            self.assertEqual(response.status_code, 200)
+
+    def test_health_check_returns_json(self):
+        """Health check response is valid JSON with required fields."""
+        response = Client().get('/api/health/')
+        data = json.loads(response.content)
+        self.assertIn('status', data)
+        self.assertIn('checks', data)
+        self.assertIn('database', data['checks'])
+        self.assertIn('cache', data['checks'])
+
+
+# ---------------------------------------------------------------------------
+# Security Event Logging Tests
+# ---------------------------------------------------------------------------
+
+class SecurityEventLoggingTests(TestCase):
+    """Tests for SecurityEvent model and logging utilities."""
+
+    def setUp(self):
+        self.user = make_user('testuser', 'test@example.com')
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+
+    def test_email_send_failure_logs_event(self):
+        """Failed email sends are logged as security events."""
+        from blog.models import SecurityEvent
+        from auth_app.utils import send_verification_email, create_email_verification_token
+        from unittest.mock import patch, MagicMock
+        from django.test import RequestFactory
+
+        factory = RequestFactory()
+        request = factory.post('/api/auth/register')
+
+        # Test SMTP failure when Resend is not configured
+        with patch('auth_app.utils.resend', None), \
+             patch('auth_app.utils.send_mail', side_effect=Exception('SMTP failed')):
+            token = create_email_verification_token(self.user)
+            send_verification_email(self.user, token, request=request)
+
+        event = SecurityEvent.objects.filter(event_type='email_send_failed').first()
+        self.assertIsNotNone(event)
+        self.assertEqual(event.user_id, self.user.id)
+        self.assertIn('SMTP failed', event.message)
+
+    @override_settings(
+        AWS_STORAGE_BUCKET_NAME='test-bucket',
+        AWS_S3_ENDPOINT_URL='https://s3.example.com',
+        AWS_S3_REGION_NAME='us-east-1',
+        AWS_ACCESS_KEY_ID='test-key',
+        AWS_SECRET_ACCESS_KEY='test-secret',
+        AWS_S3_USE_SSL=True,
+    )
+    def test_storage_failure_logs_event(self):
+        """Storage failures are logged as security events."""
+        from blog.models import SecurityEvent
+        from unittest.mock import patch, MagicMock
+
+        # Test with S3 enabled and boto3 failing
+        with patch('boto3.client') as mock_boto3_client:
+            mock_s3 = MagicMock()
+            mock_s3.generate_presigned_url.side_effect = Exception('S3 failed')
+            mock_boto3_client.return_value = mock_s3
+
+            from helpers.storage import get_presigned_url_or_none
+            result = get_presigned_url_or_none('test.jpg')
+
+        self.assertIsNone(result)
+        event = SecurityEvent.objects.filter(event_type='storage_failed').first()
+        self.assertIsNotNone(event)
+        self.assertIn('S3 failed', event.message)
+
+
+# ---------------------------------------------------------------------------
+# Security Events Endpoint Tests
+# ---------------------------------------------------------------------------
+
+class SecurityEventsEndpointTests(TestCase):
+    """Tests for GET /api/admin/security-events/"""
+
+    def setUp(self):
+        self.admin = make_user('admin', 'admin@example.com', role='admin')
+        self.editor = make_user('editor', 'editor@example.com', role='editor')
+        self.admin_client = jwt_client(self.admin)
+        self.editor_client = jwt_client(self.editor)
+
+    def test_non_admin_cannot_access_security_events(self):
+        """Non-admin users get 403 when accessing security events endpoint."""
+        response = self.editor_client.get('/api/admin/security-events/')
+        self.assertEqual(response.status_code, 403)
+
+    def test_unauthenticated_cannot_access_security_events(self):
+        """Unauthenticated users get 401 when accessing security events endpoint."""
+        response = Client().get('/api/admin/security-events/')
+        self.assertEqual(response.status_code, 401)
+
+    def test_admin_can_view_security_events(self):
+        """Admin users can view security events."""
+        from blog.models import SecurityEvent
+        from blog.security_utils import log_security_event
+
+        # Log some events
+        log_security_event('permission_denied', message='Test event 1')
+        log_security_event('rate_limited', message='Test event 2')
+
+        response = self.admin_client.get('/api/admin/security-events/')
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        self.assertIsInstance(data, list)
+        self.assertGreaterEqual(len(data), 2)
+
+    def test_security_events_filter_by_event_type(self):
+        """Security events can be filtered by event_type."""
+        from blog.security_utils import log_security_event
+
+        log_security_event('permission_denied', message='Test 1')
+        log_security_event('rate_limited', message='Test 2')
+        log_security_event('permission_denied', message='Test 3')
+
+        response = self.admin_client.get('/api/admin/security-events/?event_type=permission_denied')
+        self.assertEqual(response.status_code, 200)
+        data = json.loads(response.content)
+        for event in data:
+            self.assertEqual(event['event_type'], 'permission_denied')

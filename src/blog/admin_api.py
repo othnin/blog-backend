@@ -20,7 +20,7 @@ from typing import List, Optional
 from datetime import datetime, timedelta
 from calendar import monthrange
 from .permissions import IsAdmin
-from .models import BlogPost, Category, Comment, Tag
+from .models import BlogPost, Category, Comment, Tag, SecurityEvent
 from recipes.models import Recipe
 from ninja import File
 from ninja.files import UploadedFile
@@ -44,6 +44,7 @@ from .serializers import (
     TimeSeriesPointOut,
     TopPostOut,
     ActiveUserOut,
+    SecurityEventOut,
 )
 
 logger = logging.getLogger('blog')
@@ -618,3 +619,43 @@ class AdminController:
         tag = get_object_or_404(Tag, id=tag_id)
         tag.delete()
         return {"message": "Tag deleted successfully"}
+
+    @http_get("/security-events/", response=List[SecurityEventOut])
+    def get_security_events(
+        self,
+        event_type: Optional[str] = None,
+        ip: Optional[str] = None,
+        search: Optional[str] = None,
+        start_date: Optional[str] = None,
+        end_date: Optional[str] = None,
+    ) -> List[SecurityEventOut]:
+        """
+        Get security events with optional filtering by type, IP, date range, or message search.
+        Limit to 200 most recent events.
+        """
+        query = SecurityEvent.objects.select_related('user').all()
+
+        if event_type:
+            query = query.filter(event_type=event_type)
+
+        if ip:
+            query = query.filter(ip_address=ip)
+
+        if search:
+            query = query.filter(message__icontains=search)
+
+        if start_date:
+            try:
+                start = datetime.strptime(start_date, "%Y-%m-%d")
+                query = query.filter(created_at__gte=start)
+            except ValueError:
+                pass
+
+        if end_date:
+            try:
+                end = datetime.strptime(end_date, "%Y-%m-%d") + timedelta(days=1)
+                query = query.filter(created_at__lt=end)
+            except ValueError:
+                pass
+
+        return [SecurityEventOut.from_orm(event) for event in query.order_by("-created_at")[:200]]

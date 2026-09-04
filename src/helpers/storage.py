@@ -1,8 +1,11 @@
 """
 Presigned URL generation for S3-compatible storage (Tigris) and local filesystem fallback.
 """
+import logging
 from typing import Optional
 from django.conf import settings
+
+logger = logging.getLogger(__name__)
 
 
 def get_presigned_url(key: Optional[str], expires_in: int = 86400) -> Optional[str]:
@@ -41,5 +44,16 @@ def get_presigned_url_or_none(key: Optional[str], expires_in: int = 86400) -> Op
     """
     try:
         return get_presigned_url(key, expires_in)
-    except Exception:
+    except Exception as e:
+        logger.error(f"Failed to generate presigned URL for key {key}: {str(e)}")
+        try:
+            from blog.security_utils import log_security_event
+            log_security_event(
+                'storage_failed',
+                message=f"Failed to generate presigned URL: {str(e)}",
+                details={'key': key},
+                severity='warning',
+            )
+        except Exception:
+            pass
         return None

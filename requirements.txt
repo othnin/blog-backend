@@ -16,3 +16,4 @@ django-storages~=1.14
 boto3~=1.28
 resend~=2.0
 redis~=5.0
+sentry-sdk~=2.18

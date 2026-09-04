@@ -436,3 +436,29 @@ class AdminTagUpdateIn(BaseModel):
     name: Optional[str] = Field(None, min_length=1, max_length=100)
     meta_description: Optional[str] = None
 
+
+class SecurityEventOut(BaseModel):
+    id: int
+    event_type: str
+    severity: str
+    ip_address: str
+    user_id: Optional[int] = None
+    username: Optional[str] = None
+    message: str
+    details: dict
+    created_at: datetime
+
+    @staticmethod
+    def from_orm(obj):
+        return SecurityEventOut(
+            id=obj.id,
+            event_type=obj.event_type,
+            severity=obj.severity,
+            ip_address=obj.ip_address,
+            user_id=obj.user_id,
+            username=obj.user.username if obj.user else None,
+            message=obj.message,
+            details=obj.details,
+            created_at=obj.created_at,
+        )
+

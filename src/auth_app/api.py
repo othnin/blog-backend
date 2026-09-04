@@ -124,7 +124,7 @@ def register(request, data: RegisterSerializer):
         
         # Create email verification token and send email
         token = create_email_verification_token(user)
-        send_verification_email(user, token)
+        send_verification_email(user, token, request=request)
         
         user_data = UserResponseSchema(
             id=user.id,
@@ -339,9 +339,9 @@ def password_reset_request(request, data: PasswordResetRequestSerializer):
             
             # Create password reset token
             token = create_password_reset_token(user)
-            
+
             # Send password reset email
-            send_password_reset_email(user, token)
+            send_password_reset_email(user, token, request=request)
             
         except User.DoesNotExist:
             # Don't reveal if user exists (security best practice)
@@ -431,7 +431,7 @@ def resend_verification_email(request, data: ResendVerificationSchema):
             # Invalidate any existing unused tokens
             EmailVerificationToken.objects.filter(user=user, is_used=False).update(is_used=True)
             token = create_email_verification_token(user)
-            send_verification_email(user, token)
+            send_verification_email(user, token, request=request)
     except User.DoesNotExist:
         pass  # Don't reveal whether the email exists
     except Exception:
@@ -551,7 +551,19 @@ def upload_avatar(request, file: UploadedFile = File(...)):
     img.save(img_bytes, format='JPEG', quality=85)
     img_bytes.seek(0)
 
-    default_storage.save(filepath, img_bytes)
+    try:
+        default_storage.save(filepath, img_bytes)
+    except Exception as e:
+        from blog.security_utils import log_security_event
+        log_security_event(
+            'storage_failed',
+            request=request,
+            user=request.user,
+            message=f"Failed to upload avatar: {str(e)}",
+            details={'filename': filename},
+            severity='warning',
+        )
+        raise HttpError(500, "Failed to upload avatar. Please try again.")
 
     profile = request.user.profile
     if profile.avatar:

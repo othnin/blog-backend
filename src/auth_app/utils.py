@@ -18,6 +18,15 @@ except ImportError:
 logger = logging.getLogger(__name__)
 
 
+def _log_security_event(event_type, request=None, user=None, message="", details=None, severity="warning"):
+    """Safely import and call log_security_event to avoid circular imports."""
+    try:
+        from blog.security_utils import log_security_event
+        log_security_event(event_type, request=request, user=user, message=message, details=details, severity=severity)
+    except Exception:
+        pass
+
+
 def generate_token():
     """Generate a secure random token."""
     return secrets.token_urlsafe(32)
@@ -57,7 +66,7 @@ def create_password_reset_token(user):
     return token
 
 
-def send_verification_email(user, token):
+def send_verification_email(user, token, request=None):
     """
     Send email verification email to user.
     Uses Resend API if RESEND_API_KEY is set, otherwise falls back to Django's send_mail.
@@ -84,6 +93,14 @@ def send_verification_email(user, token):
             })
         except Exception as e:
             logger.error(f"Failed to send verification email via Resend for user {user.id}: {str(e)}")
+            _log_security_event(
+                'email_send_failed',
+                request=request,
+                user=user,
+                message=f"Failed to send verification email via Resend: {str(e)}",
+                details={'email_type': 'verification', 'provider': 'resend'},
+                severity='warning',
+            )
     else:
         try:
             send_mail(
@@ -95,9 +112,17 @@ def send_verification_email(user, token):
             )
         except Exception as e:
             logger.error(f"Failed to send verification email via SMTP for user {user.id}: {str(e)}")
+            _log_security_event(
+                'email_send_failed',
+                request=request,
+                user=user,
+                message=f"Failed to send verification email via SMTP: {str(e)}",
+                details={'email_type': 'verification', 'provider': 'smtp'},
+                severity='warning',
+            )
 
 
-def send_password_reset_email(user, token):
+def send_password_reset_email(user, token, request=None):
     """
     Send password reset email to user.
     Uses Resend API if RESEND_API_KEY is set, otherwise falls back to Django's send_mail.
@@ -124,6 +149,14 @@ def send_password_reset_email(user, token):
             })
         except Exception as e:
             logger.error(f"Failed to send password reset email via Resend for user {user.id}: {str(e)}")
+            _log_security_event(
+                'email_send_failed',
+                request=request,
+                user=user,
+                message=f"Failed to send password reset email via Resend: {str(e)}",
+                details={'email_type': 'password_reset', 'provider': 'resend'},
+                severity='warning',
+            )
     else:
         try:
             send_mail(
@@ -135,3 +168,11 @@ def send_password_reset_email(user, token):
             )
         except Exception as e:
             logger.error(f"Failed to send password reset email via SMTP for user {user.id}: {str(e)}")
+            _log_security_event(
+                'email_send_failed',
+                request=request,
+                user=user,
+                message=f"Failed to send password reset email via SMTP: {str(e)}",
+                details={'email_type': 'password_reset', 'provider': 'smtp'},
+                severity='warning',
+            )
