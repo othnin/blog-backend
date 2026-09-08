@@ -9,7 +9,7 @@ from django.test import TestCase, override_settings, Client, RequestFactory
 from django.core.cache import cache
 from ninja.errors import HttpError
 
-from helpers.rate_limit import check_rate_limit, _get_ip
+from helpers.rate_limit import check_rate_limit, get_client_ip
 
 
 @override_settings(RATE_LIMIT_ENABLED=True)
@@ -23,12 +23,12 @@ class GetIpTests(TestCase):
     def test_no_xff_uses_remote_addr(self):
         """Without X-Forwarded-For, use REMOTE_ADDR."""
         request = self.factory.get("/", REMOTE_ADDR="10.0.0.1")
-        self.assertEqual(_get_ip(request), "10.0.0.1")
+        self.assertEqual(get_client_ip(request), "10.0.0.1")
 
     def test_single_xff_hop(self):
         """Single X-Forwarded-For hop is returned directly."""
         request = self.factory.get("/", HTTP_X_FORWARDED_FOR="192.168.1.1")
-        self.assertEqual(_get_ip(request), "192.168.1.1")
+        self.assertEqual(get_client_ip(request), "192.168.1.1")
 
     def test_multiple_xff_hops_rightmost_wins(self):
         """Multiple X-Forwarded-For hops: rightmost (closest to Railway) is trusted."""
@@ -36,7 +36,7 @@ class GetIpTests(TestCase):
             "/", HTTP_X_FORWARDED_FOR="5.5.5.5, 6.6.6.6, 7.7.7.7"
         )
         # With NUM_TRUSTED_PROXIES=1 (default), take the rightmost single hop
-        self.assertEqual(_get_ip(request), "7.7.7.7")
+        self.assertEqual(get_client_ip(request), "7.7.7.7")
 
     def test_multiple_xff_hops_with_num_proxies_2(self):
         """With NUM_TRUSTED_PROXIES=2, take the last 2 hops and return the first of those."""
@@ -45,21 +45,21 @@ class GetIpTests(TestCase):
                 "/", HTTP_X_FORWARDED_FOR="1.1.1.1, 2.2.2.2, 3.3.3.3, 4.4.4.4"
             )
             # Last 2 hops are [3.3.3.3, 4.4.4.4]; return the first of those
-            self.assertEqual(_get_ip(request), "3.3.3.3")
+            self.assertEqual(get_client_ip(request), "3.3.3.3")
 
     def test_xff_with_whitespace(self):
         """X-Forwarded-For entries with whitespace are stripped."""
         request = self.factory.get(
             "/", HTTP_X_FORWARDED_FOR=" 1.1.1.1 , 2.2.2.2 , 3.3.3.3 "
         )
-        self.assertEqual(_get_ip(request), "3.3.3.3")
+        self.assertEqual(get_client_ip(request), "3.3.3.3")
 
     def test_empty_xff_falls_back_to_remote_addr(self):
         """Empty X-Forwarded-For falls back to REMOTE_ADDR."""
         request = self.factory.get(
             "/", HTTP_X_FORWARDED_FOR="", REMOTE_ADDR="10.0.0.99"
         )
-        self.assertEqual(_get_ip(request), "10.0.0.99")
+        self.assertEqual(get_client_ip(request), "10.0.0.99")
 
 
 @override_settings(RATE_LIMIT_ENABLED=True)

@@ -116,7 +116,7 @@ class SSLRedirectMiddleware:
         # Exempt paths that should allow plain HTTP
         exempt_paths = ['/api/health/']
 
-        if not settings.DEBUG and request.scheme == 'http':
+        if settings.FORCE_HTTPS_REDIRECT and request.scheme == 'http':
             # Check if this path is exempt from SSL redirect
             if not any(request.path == path for path in exempt_paths):
                 # Redirect to HTTPS

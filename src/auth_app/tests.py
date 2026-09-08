@@ -1447,10 +1447,10 @@ class AuthAvatarUploadTests(TestCase):
         )
         self.user.profile.email_verified = True
         self.user.profile.save()
-        
+
         from io import BytesIO
         from PIL import Image
-        
+
         # Create a test image
         img = Image.new('RGB', (100, 100), color='red')
         self.test_image = BytesIO()

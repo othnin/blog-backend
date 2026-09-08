@@ -26,6 +26,12 @@ SECRET_KEY = config("DJANGO_SECRET_KEY", cast=str)
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = config("DJANGO_DEBUG", cast=bool, default=False)
 
+# Captured independently of settings.DEBUG: Django's test runner forces
+# settings.DEBUG=False for the duration of `manage.py test` (to mirror
+# production template/error rendering), which would otherwise make
+# SSLRedirectMiddleware force an HTTPS redirect on every test request.
+FORCE_HTTPS_REDIRECT = not DEBUG
+
 ALLOWED_HOSTS = config("ALLOWED_HOSTS_STR", cast=str, default=".railway.app").split(",")
 ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS if h.strip()]
 if DEBUG:
