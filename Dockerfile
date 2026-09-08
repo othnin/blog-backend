@@ -1,6 +1,6 @@
 # Set the python version as a build-time argument
 # with Python 3.12 as the default
-ARG PYTHON_VERSION=3.12-slim-bullseye
+ARG PYTHON_VERSION=3.12-slim-bookworm
 FROM python:${PYTHON_VERSION}
 
 # Create a virtual environment
@@ -17,9 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 # Install os dependencies for our mini vm
-RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
-    sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
-    apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y \
     # for postgres
     libpq-dev \
     # for Pillow
