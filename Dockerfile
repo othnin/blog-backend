@@ -17,7 +17,9 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 # Install os dependencies for our mini vm
-RUN apt-get update -o Acquire::Check-Valid-Until=false && apt-get install -y \
+RUN sed -i 's/deb.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
+    sed -i 's/security.debian.org/archive.debian.org/g' /etc/apt/sources.list && \
+    apt-get update && apt-get install -y \
     # for postgres
     libpq-dev \
     # for Pillow
