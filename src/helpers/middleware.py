@@ -115,8 +115,10 @@ class SSLRedirectMiddleware:
     def __call__(self, request):
         # Exempt paths that should allow plain HTTP
         exempt_paths = ['/api/health/']
+        # Exempt localhost/127.0.0.1 (for local development and CI)
+        is_localhost = request.get_host().split(':')[0] in ('localhost', '127.0.0.1')
 
-        if settings.FORCE_HTTPS_REDIRECT and request.scheme == 'http':
+        if settings.FORCE_HTTPS_REDIRECT and request.scheme == 'http' and not is_localhost:
             # Check if this path is exempt from SSL redirect
             if not any(request.path == path for path in exempt_paths):
                 # Redirect to HTTPS
