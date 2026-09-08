@@ -17,7 +17,7 @@ ENV PYTHONDONTWRITEBYTECODE 1
 ENV PYTHONUNBUFFERED 1
 
 # Install os dependencies for our mini vm
-RUN apt-get update && apt-get install -y \
+RUN apt-get update && apt-get install -y -o Acquire::Check-Valid-Until=false \
     # for postgres
     libpq-dev \
     # for Pillow
