@@ -16,6 +16,7 @@ rav>=0.1,<1.0
 Pillow>=10.0.0,<11.0.0
 django-ninja-extra>=0.19.0,<1.0.0
 google-auth>=2.25.0,<3.0.0
+requests>=2.31.0,<3.0.0
 django-storages>=1.14.0,<2.0.0
 boto3>=1.28.0,<2.0.0
 resend>=2.0.0,<3.0.0
