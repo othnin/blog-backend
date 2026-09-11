@@ -260,10 +260,6 @@ SKIP_EMAIL_VERIFICATION = config("SKIP_EMAIL_VERIFICATION", cast=bool, default=c
 # Google OAuth
 GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID", cast=str, default="")
 
-# Facebook OAuth
-FACEBOOK_APP_ID = config("FACEBOOK_APP_ID", cast=str, default="")
-FACEBOOK_APP_SECRET = config("FACEBOOK_APP_SECRET", cast=str, default="")
-
 # Cache — LocMemCache for development; set CACHE_URL=redis://... for production
 CACHE_URL = config("CACHE_URL", cast=str, default="")
 if CACHE_URL:

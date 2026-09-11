@@ -20,7 +20,6 @@ from django.conf import settings
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
 from ninja_jwt.tokens import RefreshToken
-import requests
 from auth_app.serializers import (
     RegisterSerializer,
     EmailVerificationSerializer,
@@ -73,11 +72,6 @@ class AuthResponseSchema(Schema):
 class GoogleLoginSchema(Schema):
     """Request schema for Google OAuth login."""
     credential: str
-
-
-class FacebookLoginSchema(Schema):
-    """Request schema for Facebook OAuth login."""
-    access_token: str
 
 
 class TokenResponseSchema(Schema):
@@ -247,99 +241,6 @@ def google_login(request, payload: GoogleLoginSchema):
         return {"status": "error", "message": "Google email not verified"}
 
     email = idinfo['email']
-
-    try:
-        user = User.objects.get(email=email)
-    except User.DoesNotExist:
-        user = User.objects.create_user(
-            username=_generate_unique_username(email),
-            email=email,
-        )
-
-    profile, _ = UserProfile.objects.get_or_create(user=user)
-    if not profile.email_verified:
-        profile.email_verified = True
-        profile.save(update_fields=['email_verified'])
-
-    refresh = RefreshToken.for_user(user)
-    return {
-        "status": "success",
-        "refresh": str(refresh),
-        "access": str(refresh.access_token),
-        "username": user.username,
-    }
-
-
-def _verify_facebook_token(access_token):
-    """Verify Facebook access token via Graph API debug_token and fetch profile."""
-    try:
-        app_id = settings.FACEBOOK_APP_ID
-        app_secret = settings.FACEBOOK_APP_SECRET
-
-        if not app_id or not app_secret:
-            return None
-
-        app_access_token = f"{app_id}|{app_secret}"
-
-        debug_response = requests.get(
-            "https://graph.facebook.com/debug_token",
-            params={
-                "input_token": access_token,
-                "access_token": app_access_token,
-            },
-            timeout=5,
-        )
-        debug_response.raise_for_status()
-        debug_data = debug_response.json()
-
-        if not debug_data.get("data", {}).get("is_valid"):
-            return None
-
-        if debug_data.get("data", {}).get("app_id") != app_id:
-            return None
-
-        profile_response = requests.get(
-            "https://graph.facebook.com/me",
-            params={
-                "fields": "id,email,name",
-                "access_token": access_token,
-            },
-            timeout=5,
-        )
-        profile_response.raise_for_status()
-        profile_data = profile_response.json()
-
-        return profile_data
-
-    except (requests.RequestException, ValueError, KeyError):
-        return None
-
-
-@router.post("/facebook-login", auth=None)
-def facebook_login(request, payload: FacebookLoginSchema):
-    """
-    Authenticate using Facebook OAuth. Accepts a Facebook access token.
-    Creates a new user if the email doesn't exist, or links to existing account.
-    Returns JWT tokens for successful authentication.
-
-    Required fields:
-    - access_token: Facebook access token from FB.login()
-
-    Response:
-    - Returns status and JWT tokens on success
-    - Returns error message on invalid token or verification failure
-    """
-    check_rate_limit(request, key="facebook_login", max_requests=10, period=600)
-
-    profile_data = _verify_facebook_token(payload.access_token)
-
-    if not profile_data:
-        return {"status": "error", "message": "Invalid Facebook token"}
-
-    email = profile_data.get("email")
-
-    if not email:
-        return {"status": "error", "message": "Facebook account has no verified email"}
 
     try:
         user = User.objects.get(email=email)
