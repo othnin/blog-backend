@@ -1,0 +1,24 @@
+{
+  "intro": {
+    "title": "Welcome to my corner of the internet.",
+    "description": "Would I build this from scratch again? Probably not. It's kind of a pain in the ass. But full source code with a Django backend and Node frontend? I couldn't find anything like that. So here we are. This site is built on three pillars: the science that fascinates me, the cooking that shaped me, and the code that pays the bills."
+  },
+  "sections": [
+    {
+      "title": "Science",
+      "content": "I got my first degree—a Bachelor of Science in Psychology. Most of that work was at Texas A&M in behavioral neuroscience. I gravitated toward science after getting bored with Computer Science. In college I read everything: the 1990s pseudo-science classics (Dancing Wu Li Masters, Zen and the Art of Motorcycle Maintenance, The Tao of Physics) mixed in with real science books—Stephen Jay Gould, Richard Dawkins, and others.\n\nWriters like Carl Sagan and E.O. Wilson wrote about science like it was a mystery, a detective story about discovery. What was obscured by ideology or incomplete knowledge was laid open by these brave people with an unwavering belief in evidence. I want to bring some of that excitement here. Will I compete with people actually doing this for a living? No. But I can shamelessly steal from them and share what captures my curiosity.\n\nThere's something magical about the moment when something obscured becomes clear. I'm chasing that feeling."
+    },
+    {
+      "title": "Cooking",
+      "content": "Cooking started in College Station out of desperation. I needed money and delivering pizzas wasn't cutting it. My roommate worked at a fine dining place called Rembrandts. I ended up in the pantry—not my first choice, but it was there.\n\nGrowing up, we didn't cook. Canned green beans and Stouffer's frozen dinners. Then I spent years working my way across Texas: College Station, Austin—Pacifica, Siena, Star Canyon. This was before Anthony Bourdain made cooks cool. Believe it or not, being a cook closing the kitchen at midnight, reeking of fryer oil and desperation, didn't exactly make you a ladies' man. The reality was nothing like Kitchen Confidential, and definitely not as exciting.\n\nBut something stuck. There's a strange intimacy to cooking—the precision, the constraint, the creativity. A recipe is both a wall and a playground. I've put together a recipes section with things I actually make, and a few new ones worth trying."
+    },
+    {
+      "title": "Programming",
+      "content": "I have a degree in software engineering from Texas State and I've been doing this professionally for about 12 years. I majored in Computer Science my freshman year, got bored, and walked away. Looking back, that was probably stupid. If I'd stayed, who knows how rich I'd be hanging around with people I absolutely despise now. A real Mr. Destiny moment.\n\nI was a nerd before being a nerd was cool. My best friend's dad had a portable computer that weighed about 40 pounds. After watching War Games, I was hooked. We got an old 80286 Intel and dreamed of wardialing our way into history. Then life happened, I cooked for years, went back to school, and got the degree.\n\nHere's what I learned: there's something odd and intimate about writing software. A codebase is a file, but it becomes almost a recipe—strange to say, but true. When other people are in it doing even small things, you feel it. It's not an invasion, it's an observation. And that's why code review matters. Not just for catching bugs, but so junior developers see how senior developers think. That kind of apprenticeship is invaluable. It'll save your ass."
+    },
+    {
+      "title": "Current Events",
+      "content": "I'll also write about current events and ideas that catch my attention. You can't run a blog without opinions. I've got plenty.\n\nStart with the blog. Pick something that interests you. Let me know what you think. I'm curious what lands."
+    }
+  ]
+}

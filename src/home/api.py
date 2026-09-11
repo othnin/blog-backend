@@ -1,5 +1,6 @@
 import helpers
 import json
+import os
 from helpers.rate_limit import check_rate_limit
 from ninja import NinjaAPI, Schema, Router
 from pydantic import ValidationError as PydanticValidationError
@@ -181,6 +182,23 @@ class UserSchema(Schema):
 @api.get("/hello")
 def hello(request):
     return {"message": "Hello World"}
+
+
+@api.get("/homepage/content")
+def get_homepage_content(request):
+    """
+    Get homepage content from JSON file.
+    Returns intro text and sections for the homepage.
+    """
+    try:
+        data_path = os.path.join(os.path.dirname(__file__), 'data', 'homepage.json')
+        with open(data_path, 'r') as f:
+            content = json.load(f)
+        return content
+    except FileNotFoundError:
+        return JsonResponse({'detail': 'Homepage content not found'}, status=404)
+    except json.JSONDecodeError:
+        return JsonResponse({'detail': 'Error parsing homepage content'}, status=500)
 
 
 @api.get("/me",

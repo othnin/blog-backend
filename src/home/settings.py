@@ -110,6 +110,8 @@ if not DEBUG:
     SECURE_BROWSER_XSS_FILTER = True
     SECURE_REFERRER_POLICY = "strict-origin-when-cross-origin"
     X_FRAME_OPTIONS = "DENY"
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
 
 TEMPLATES = [
     {
