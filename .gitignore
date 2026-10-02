@@ -171,3 +171,6 @@ src/media/blog_images/*
 
 src/media/avatars/*
 !src/media/avatars/.gitkeep
+
+src/media/category_images/*
+!src/media/category_images/.gitkeep

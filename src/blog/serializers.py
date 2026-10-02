@@ -182,7 +182,7 @@ class BlogPostOut(BaseModel):
     published_at: Optional[datetime] = None
     created_at: datetime
     updated_at: datetime
-    author: BlogPostAuthorOut
+    author: Optional[BlogPostAuthorOut] = None
     category: Optional[CategoryOut] = None
     tags: List[TagOut] = []
 
@@ -264,7 +264,7 @@ class BlogPostListOut(BaseModel):
     like_count: int
     published_at: Optional[datetime] = None
     created_at: datetime
-    author: UserBasicOut
+    author: Optional[UserBasicOut] = None
     category: Optional[CategoryOut] = None
     tags: List[TagOut] = []
     content_text: str = ''

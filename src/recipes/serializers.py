@@ -210,7 +210,7 @@ class RecipeListOut(BaseModel):
     comments_disabled: bool = False
     published_at: Optional[datetime] = None
     created_at: datetime
-    author: RecipeAuthorOut
+    author: Optional[RecipeAuthorOut] = None
     description: str = ''
     description_text: str = ''
     images: List[str] = []

@@ -1885,6 +1885,134 @@ class AuthChangePasswordTests(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Account Deletion Tests  (DELETE /api/auth/delete-account)
+# ---------------------------------------------------------------------------
+
+class DeleteAccountTests(TestCase):
+    """Tests for DELETE /api/auth/delete-account — account deletion with content anonymization."""
+
+    def setUp(self):
+        from blog.models import BlogPost, Comment
+        from recipes.models import Recipe
+
+        self.BlogPost = BlogPost
+        self.Comment = Comment
+        self.Recipe = Recipe
+
+        self.client = Client()
+        self.url = '/api/auth/delete-account'
+        self.token_url = '/api/token/pair'
+
+        self.editor = User.objects.create_user(
+            username='editor', email='editor@example.com', password='ValidPass123'
+        )
+        self.editor.profile.role = 'editor'
+        self.editor.profile.email_verified = True
+        self.editor.profile.save()
+
+        self.other = User.objects.create_user(
+            username='other', email='other@example.com', password='ValidPass123'
+        )
+        self.other.profile.role = 'editor'
+        self.other.profile.email_verified = True
+        self.other.profile.save()
+
+        self.post = BlogPost.objects.create(
+            title='My Post', slug='my-post', author=self.editor,
+            content_json='{}', status='published',
+        )
+        self.recipe = Recipe.objects.create(
+            title='My Recipe', slug='my-recipe', author=self.editor,
+            status='published',
+        )
+        self.comment = Comment.objects.create(
+            post=self.post, author=self.editor, content_json='{}',
+        )
+
+    def _token(self, username='editor', password='ValidPass123'):
+        r = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': username, 'password': password}),
+            content_type='application/json',
+        )
+        return json.loads(r.content)['access']
+
+    def test_delete_account_returns_200(self):
+        """Regression: bad `from storage_backends import` import made this endpoint 500."""
+        r = self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.assertEqual(r.status_code, 200)
+
+    def test_delete_account_removes_user(self):
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.assertFalse(User.objects.filter(username='editor').exists())
+
+    def test_delete_account_anonymizes_posts(self):
+        """Regression: author was NOT NULL, so update(author=None) raised IntegrityError."""
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.post.refresh_from_db()
+        self.assertIsNone(self.post.author_id)
+
+    def test_delete_account_anonymizes_recipes(self):
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.recipe.refresh_from_db()
+        self.assertIsNone(self.recipe.author_id)
+
+    def test_delete_account_anonymizes_comments(self):
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.comment.refresh_from_db()
+        self.assertIsNone(self.comment.author_id)
+
+    def test_content_survives_account_deletion(self):
+        """Anonymized content must remain, not be cascade-deleted."""
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.assertTrue(self.BlogPost.objects.filter(id=self.post.id).exists())
+        self.assertTrue(self.Recipe.objects.filter(id=self.recipe.id).exists())
+        self.assertTrue(self.Comment.objects.filter(id=self.comment.id).exists())
+
+    def test_anonymized_post_still_renders_in_public_api(self):
+        """A published post with a null author must still serialize (author: null)."""
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        r = self.client.get('/api/blog/posts/my-post/')
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(json.loads(r.content)['author'])
+
+    def test_anonymized_post_appears_in_list_api(self):
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        r = self.client.get('/api/blog/posts/')
+        self.assertEqual(r.status_code, 200)
+        author = json.loads(r.content)[0]['author']
+        self.assertIsNone(author)
+
+    def test_delete_account_deletes_verification_tokens(self):
+        EmailVerificationToken.objects.create(
+            user=self.editor, token=generate_token(), expires_at=timezone.now() + timedelta(hours=1)
+        )
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.assertFalse(EmailVerificationToken.objects.filter(user=self.editor).exists())
+
+    def test_delete_account_leaves_other_users_content_intact(self):
+        other_post = self.BlogPost.objects.create(
+            title='Other Post', slug='other-post', author=self.other,
+            content_json='{}', status='published',
+        )
+        self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        other_post.refresh_from_db()
+        self.assertEqual(other_post.author_id, self.other.id)
+
+    def test_delete_account_unauthenticated_returns_401(self):
+        r = self.client.delete(self.url)
+        self.assertEqual(r.status_code, 401)
+
+    def test_error_response_does_not_leak_exception_text(self):
+        """Internal errors must not be echoed to the caller."""
+        with patch('auth_app.api.UserProfile.objects.get', side_effect=ValueError('boom-internal-sql')):
+            r = self.client.delete(self.url, HTTP_AUTHORIZATION=f'Bearer {self._token()}')
+        self.assertEqual(r.status_code, 500)
+        body = json.loads(r.content)['message']
+        self.assertNotIn('boom-internal-sql', body)
+
+
+# ---------------------------------------------------------------------------
 # Rate Limiting Tests
 # ---------------------------------------------------------------------------
 

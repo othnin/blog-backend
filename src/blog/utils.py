@@ -46,7 +46,7 @@ def can_edit_post(user, blog_post) -> bool:
     if role == 'admin':
         return True
     elif role == 'editor':
-        return blog_post.author.id == user.id
+        return blog_post.author_id == user.id
     
     return False
 
@@ -66,7 +66,7 @@ def can_publish_post(user, blog_post) -> bool:
     if role == 'admin':
         return True
     elif role == 'editor':
-        return blog_post.author.id == user.id
+        return blog_post.author_id == user.id
     
     return False
 

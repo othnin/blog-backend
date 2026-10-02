@@ -87,9 +87,11 @@ class BlogPost(models.Model):
     slug = models.SlugField(max_length=500, unique=True, db_index=True)
     author = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name='blog_posts',
-        help_text='The author/editor of the blog post'
+        help_text='The author/editor of the blog post. Null after account deletion.'
     )
 
     # Content
@@ -225,7 +227,9 @@ class Comment(models.Model):
     )
     author = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name='comments',
     )
     parent = models.ForeignKey(

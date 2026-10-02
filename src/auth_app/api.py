@@ -12,6 +12,7 @@ from pydantic import ValidationError as PydanticValidationError
 from typing import Optional
 import helpers
 import io
+import logging
 import os
 import uuid
 import re
@@ -19,6 +20,7 @@ from PIL import Image
 from django.conf import settings
 from google.oauth2 import id_token
 from google.auth.transport import requests as google_requests
+from django.http import JsonResponse
 from ninja_jwt.tokens import RefreshToken
 from auth_app.serializers import (
     RegisterSerializer,
@@ -42,6 +44,8 @@ from auth_app.utils import (
 )
 
 router = Router()
+
+logger = logging.getLogger('auth_app')
 
 
 def _generate_unique_username(email):
@@ -618,10 +622,10 @@ def delete_account(request):
     - Deletes avatar file
     """
     from blog.models import BlogPost, Comment
-    from storage_backends import default_storage
+    from recipes.models import Recipe
+    from django.core.files.storage import default_storage
 
     user = request.user
-    user_id = user.id
 
     try:
         # Get user profile to access avatar
@@ -633,18 +637,11 @@ def delete_account(request):
             if default_storage.exists(avatar_path):
                 default_storage.delete(avatar_path)
 
-        # Anonymize blog posts (set author to null)
+        # Anonymize content. author is nullable with SET_NULL, so content
+        # survives the account deletion and is simply attributed to nobody.
         BlogPost.objects.filter(author=user).update(author=None)
-
-        # Anonymize comments (set author to null)
         Comment.objects.filter(author=user).update(author=None)
-
-        # Try to anonymize recipes if the app exists
-        try:
-            from recipes.models import Recipe
-            Recipe.objects.filter(author=user).update(author=None)
-        except ImportError:
-            pass
+        Recipe.objects.filter(author=user).update(author=None)
 
         # Delete all email/password reset tokens for this user
         EmailVerificationToken.objects.filter(user=user).delete()
@@ -661,11 +658,15 @@ def delete_account(request):
             'message': 'Your account has been deleted. Your content will remain published but with no author.'
         }
 
-    except Exception as e:
-        return {
-            'status': 'error',
-            'message': f'An error occurred while deleting your account: {str(e)}'
-        }, 500
+    except Exception:
+        logger.exception('Account deletion failed for user_id=%s', user.id)
+        return JsonResponse(
+            {
+                'status': 'error',
+                'message': 'An error occurred while deleting your account. Please try again.',
+            },
+            status=500,
+        )
 
 
 @router.get("/profile/{username}")

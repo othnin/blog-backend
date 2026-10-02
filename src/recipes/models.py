@@ -74,7 +74,9 @@ class Recipe(models.Model):
     slug = models.SlugField(max_length=500, unique=True, db_index=True)
     author = models.ForeignKey(
         User,
-        on_delete=models.CASCADE,
+        null=True,
+        blank=True,
+        on_delete=models.SET_NULL,
         related_name='recipes',
     )
     description = models.TextField(blank=True, default='', help_text='Lexical JSON format')

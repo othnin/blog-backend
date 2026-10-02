@@ -9,10 +9,21 @@ Authenticated-but-unauthorised requests return 403 (IsEditorOrAdmin permission).
 """
 from django.test import TestCase, Client, override_settings
 from django.contrib.auth.models import User
+from django.core.files.uploadedfile import SimpleUploadedFile
+from io import BytesIO
 import json
 
 from blog.models import BlogPost, Category, Comment, Tag
 from blog.utils import create_unique_slug, can_edit_post, can_delete_post
+
+
+def _png_file(name='cat.png', color='blue'):
+    """Build an in-memory PNG for multipart upload tests."""
+    from PIL import Image
+    buf = BytesIO()
+    Image.new('RGB', (20, 20), color=color).save(buf, format='PNG')
+    buf.seek(0)
+    return SimpleUploadedFile(name, buf.read(), content_type='image/png')
 
 
 # ---------------------------------------------------------------------------
@@ -1930,6 +1941,24 @@ class AdminCategoryManagementTests(TestCase):
         r = self.admin_client.get('/api/admin/categories/')
         data = json.loads(r.content)
         self.assertIn('image_url', data[0])
+
+    def test_upload_category_image_returns_200(self):
+        """Regression: default_storage was referenced but never imported (NameError -> 500)."""
+        r = self.admin_client.post(
+            f'/api/admin/categories/{self.cat.id}/image/',
+            data={'file': _png_file()},
+        )
+        self.assertEqual(r.status_code, 200)
+        self.cat.refresh_from_db()
+        self.assertIn('category_images/', self.cat.image_url)
+
+    def test_upload_category_image_rejects_bad_mime_type(self):
+        bad = SimpleUploadedFile('x.txt', b'not-an-image', content_type='text/plain')
+        r = self.admin_client.post(
+            f'/api/admin/categories/{self.cat.id}/image/',
+            data={'file': bad},
+        )
+        self.assertEqual(r.status_code, 400)
 
 
 class AdminRecipeTests(TestCase):

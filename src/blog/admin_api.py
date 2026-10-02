@@ -11,6 +11,7 @@ from ninja_extra.permissions import IsAuthenticated
 from ninja_jwt.authentication import JWTAuth
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
+from django.core.files.storage import default_storage
 from django.utils.text import slugify
 from django.conf import settings
 from django.db.models import Sum, Count, F, Q
@@ -259,7 +260,7 @@ class AdminController:
                 id=post.id,
                 title=post.title,
                 slug=post.slug,
-                author_username=post.author.username,
+                author_username=post.author.username if post.author_id else '',
                 like_count=post.like_count,
                 view_count=post.view_count,
             ))
@@ -323,9 +324,9 @@ class AdminController:
                 'id': post.id,
                 'name': post.title,
                 'slug': post.slug,
-                'author': post.author.username,
+                'author': post.author.username if post.author_id else '',
                 'status': post.status,
-                'description': f'by {post.author.username} ({post.status})',
+                'description': f'by {post.author.username if post.author_id else "anonymous"} ({post.status})',
             })
 
         # Search comments (author, content preview)
@@ -341,9 +342,9 @@ class AdminController:
             results.append({
                 'type': 'comment',
                 'id': comment.id,
-                'author': comment.author.username,
+                'author': comment.author.username if comment.author_id else '',
                 'post_id': comment.post_id,
-                'description': f'by {comment.author.username} on post {comment.post_id}',
+                'description': f'by {comment.author.username if comment.author_id else "anonymous"} on post {comment.post_id}',
             })
 
         # Sort by type (users first, then posts, then comments)
