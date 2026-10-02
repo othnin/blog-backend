@@ -36,7 +36,7 @@ from auth_app.serializers import (
 )
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
 from helpers.rate_limit import check_rate_limit
-from helpers.storage import get_presigned_url_or_none, get_presigned_url
+from helpers.storage import get_presigned_url_or_none, get_presigned_url, is_safe_storage_key
 from auth_app.utils import (
     create_email_verification_token,
     create_password_reset_token,
@@ -624,7 +624,7 @@ def get_avatar_url(request, filename: str):
     """
     from ninja.errors import HttpError
 
-    if not filename or not filename.startswith('avatars/'):
+    if not is_safe_storage_key(filename, 'avatars'):
         raise HttpError(400, "Invalid avatar filename")
 
     try:

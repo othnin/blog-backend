@@ -7,8 +7,50 @@ from django.conf import settings
 
 logger = logging.getLogger(__name__)
 
+# Presigned links are bearer tokens: whoever holds one can read the object until
+# it expires, and it cannot be revoked short of rotating the bucket keys. These
+# objects are blog images and avatars rather than private documents, so a short
+# lifetime is the proportionate trade - long enough for a page of images to load
+# and stay cached, short enough that a leaked link is quickly worthless.
+#
+# The two public presign endpoints (/api/auth/avatar-url, /api/blog/image-url)
+# must stay unauthenticated: rendered post content resolves image keys
+# client-side, so logged-out readers need working URLs on public pages.
+DEFAULT_EXPIRES_IN = 3600  # 1 hour
 
-def get_presigned_url(key: Optional[str], expires_in: int = 86400) -> Optional[str]:
+
+def is_safe_storage_key(key: Optional[str], prefix: str) -> bool:
+    """
+    Whether a caller-supplied key may be presigned.
+
+    Two checks, both needed:
+      - it must live under the expected prefix, so callers cannot reach
+        unrelated objects elsewhere in the bucket;
+      - it must be a single flat segment below that prefix.
+
+    The prefix test alone is not sufficient: 'blog_images/../avatars/x.jpg'
+    starts with 'blog_images/' but is not a blog image. S3 treats keys as flat
+    strings so this cannot actually traverse, but rejecting it keeps the
+    contract explicit rather than relying on storage-provider behaviour.
+    """
+    if not key or not isinstance(key, str):
+        return False
+    if not key.startswith(f"{prefix}/"):
+        return False
+    remainder = key[len(prefix) + 1:]
+    if not remainder:
+        return False
+    # No traversal, no nested prefixes, no separators that imply a path.
+    if ".." in remainder:
+        return False
+    if "/" in remainder or "\\" in remainder or "\x00" in remainder:
+        return False
+    return True
+
+
+def get_presigned_url(
+    key: Optional[str], expires_in: int = DEFAULT_EXPIRES_IN
+) -> Optional[str]:
     """
     Presign a storage key (e.g. 'avatars/xxx.jpg', 'blog_images/yyy.png') against Tigris/S3
     when configured, else return a local MEDIA_URL-relative path.
@@ -37,7 +79,9 @@ def get_presigned_url(key: Optional[str], expires_in: int = 86400) -> Optional[s
     return f"{settings.MEDIA_URL}{key}"
 
 
-def get_presigned_url_or_none(key: Optional[str], expires_in: int = 86400) -> Optional[str]:
+def get_presigned_url_or_none(
+    key: Optional[str], expires_in: int = DEFAULT_EXPIRES_IN
+) -> Optional[str]:
     """
     Same as get_presigned_url but swallows errors — for list/detail serializers
     where one bad avatar shouldn't break the whole response.

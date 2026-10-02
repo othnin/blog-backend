@@ -16,7 +16,7 @@ from django.core.files.storage import default_storage
 from typing import List, Optional
 from .models import BlogPost, Category, Comment, Tag
 from helpers.rate_limit import check_rate_limit
-from helpers.storage import get_presigned_url
+from helpers.storage import get_presigned_url, is_safe_storage_key
 from ninja import File
 from ninja.files import UploadedFile
 import uuid, os
@@ -388,7 +388,7 @@ class BlogController:
         This handles private S3 buckets by generating time-limited signed URLs.
         For local filesystem storage, returns the standard media URL.
         """
-        if not filename or not filename.startswith('blog_images/'):
+        if not is_safe_storage_key(filename, 'blog_images'):
             raise HttpError(400, "Invalid image filename")
 
         try:

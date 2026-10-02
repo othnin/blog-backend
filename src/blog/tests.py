@@ -1060,6 +1060,131 @@ class ImageUrlTests(TestCase):
         # Django Ninja returns 422 for missing required query parameters
         self.assertEqual(response.status_code, 422)
 
+@override_settings(
+    AWS_STORAGE_BUCKET_NAME='test-bucket',
+    AWS_S3_ENDPOINT_URL='https://storage.example.com',
+    AWS_S3_REGION_NAME='auto',
+    AWS_ACCESS_KEY_ID='test-key',
+    AWS_SECRET_ACCESS_KEY='test-secret',
+    AWS_S3_USE_SSL=True,
+)
+class PresignedUrlExpiryTests(TestCase):
+    """
+    Presigned links are bearer tokens: whoever holds one can read the object
+    until it expires, and it cannot be revoked short of rotating bucket keys.
+    """
+
+    def _expires_in_for(self, key='blog_images/abc.jpg'):
+        from unittest.mock import patch
+
+        from helpers.storage import get_presigned_url
+
+        with patch('boto3.client') as mock_client:
+            mock_client.return_value.generate_presigned_url.return_value = 'https://signed'
+            get_presigned_url(key)
+            _, kwargs = mock_client.return_value.generate_presigned_url.call_args
+            return kwargs['ExpiresIn']
+
+    def test_default_expiry_is_one_hour(self):
+        self.assertEqual(self._expires_in_for(), 3600)
+
+    def test_expiry_never_exceeds_one_hour(self):
+        self.assertLessEqual(self._expires_in_for(), 3600)
+
+    def test_or_none_helper_uses_same_short_expiry(self):
+        """Serializer call sites go through _or_none; they must not drift back
+        to the old 24h default."""
+        from unittest.mock import patch
+
+        from helpers.storage import get_presigned_url_or_none
+
+        with patch('boto3.client') as mock_client:
+            mock_client.return_value.generate_presigned_url.return_value = 'https://signed'
+            get_presigned_url_or_none('avatars/abc.jpg')
+            _, kwargs = mock_client.return_value.generate_presigned_url.call_args
+            self.assertEqual(kwargs['ExpiresIn'], 3600)
+
+
+class PresignNoEnumerationTests(TestCase):
+    """
+    The presign endpoints must not reveal whether a key exists.
+
+    S3/TigerBeetle presigning is a purely local cryptographic operation - it
+    never calls the storage backend, so a key that does not in the bucket
+    signs exactly as successfully as one that does. That is why these public
+    endpoints are not a bucket-enumeration oracle even without auth.
+    """
+
+    def setUp(self):
+        self.url = '/api/blog/image-url/'
+
+    def test_nonexistent_key_behaves_identically_to_existing(self):
+        existing = Client().get(self.url, {'filename': 'blog_images/' + 'a' * 32 + '.jpg'})
+        missing = Client().get(self.url, {'filename': 'blog_images/' + 'b' * 32 + '.jpg'})
+        self.assertEqual(existing.status_code, missing.status_code)
+
+    def test_response_does_not_vary_by_key_existence(self):
+        """Any well-formed key yields the same shape - nothing to probe."""
+        r = Client().get(self.url, {'filename': 'blog_images/' + 'a' * 32 + '.png'})
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('url', json.loads(r.content))
+
+    def test_keys_outside_prefix_are_rejected_uniformly(self):
+        """Traversal-ish input never reaches presigning at all."""
+        for bad in (
+            'other_prefix/x.png',
+            'media/secret.png',
+            'blog_images/../avatars/abc.jpg',
+        ):
+            with self.subTest(filename=bad):
+                r = Client().get(self.url, {'filename': bad})
+                self.assertNotEqual(r.status_code, 200)
+
+
+class StorageKeyValidationTests(TestCase):
+    """Unit coverage for the shared presign key validator."""
+
+    def test_accepts_plain_key_under_prefix(self):
+        from helpers.storage import is_safe_storage_key
+
+        self.assertTrue(is_safe_storage_key('blog_images/a1b2.jpg', 'blog_images'))
+        self.assertTrue(is_safe_storage_key('avatars/a1b2.jpg', 'avatars'))
+
+    def test_rejects_traversal_which_prefix_check_alone_allows(self):
+        """The regression: startswith('blog_images/') passes this string."""
+        from helpers.storage import is_safe_storage_key
+
+        bad = 'blog_images/../avatars/secret.jpg'
+        self.assertTrue(bad.startswith('blog_images/'))
+        self.assertFalse(is_safe_storage_key(bad, 'blog_images'))
+
+    def test_rejects_nested_and_empty_keys(self):
+        from helpers.storage import is_safe_storage_key
+
+        for bad in (
+            'blog_images/',
+            'blog_images/sub/dir.png',
+            'blog_images/..',
+            'blog_images/a\\b.png',
+            'blog_images/a\x00.png',
+            '',
+            None,
+        ):
+            with self.subTest(key=bad):
+                self.assertFalse(is_safe_storage_key(bad, 'blog_images'))
+
+    def test_rejects_wrong_prefix_and_partial_match(self):
+        from helpers.storage import is_safe_storage_key
+
+        for bad in ('avatars/x.jpg', 'blog_imagesX/a.jpg', 'prefix/blog_images/a.jpg'):
+            with self.subTest(key=bad):
+                self.assertFalse(is_safe_storage_key(bad, 'blog_images'))
+
+    def test_avatar_endpoint_rejects_traversal(self):
+        r = Client().get('/api/auth/avatar-url', {'filename': 'avatars/../x.jpg'})
+        self.assertEqual(r.status_code, 400)
+
+
 # ---------------------------------------------------------------------------
 # Tag Management Tests  (BLOG-011)
 # ---------------------------------------------------------------------------
