@@ -220,7 +220,7 @@ class RecipeController:
         description="Get rating summary for a recipe",
     )
     def get_rating(self, recipe_id: int) -> RecipeRatingOut:
-        recipe = get_object_or_404(Recipe, id=recipe_id)
+        recipe = get_object_or_404(Recipe, id=recipe_id, status='published')
         agg = Recipe.objects.filter(pk=recipe_id).annotate(
             avg_rating=Avg('ratings__score'),
             rating_count=Count('ratings', distinct=True),
@@ -247,7 +247,7 @@ class RecipeController:
         description="Get all comments for a recipe as a nested tree",
     )
     def list_comments(self, recipe_id: int) -> List[CommentOut]:
-        recipe = get_object_or_404(Recipe, id=recipe_id)
+        recipe = get_object_or_404(Recipe, id=recipe_id, status='published')
         return build_comment_tree(Comment.objects.filter(recipe=recipe))
 
     @http_post(

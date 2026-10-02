@@ -1348,6 +1348,60 @@ class PostLikeTests(TestCase):
 
 
 # ---------------------------------------------------------------------------
+# Unpublished Content Visibility Tests
+# ---------------------------------------------------------------------------
+
+class UnpublishedCommentVisibilityTests(TestCase):
+    """
+    Regression: GET /api/blog/posts/{id}/comments/ had no status filter, so an
+    anonymous caller could read comments on drafts and scheduled posts by
+    guessing sequential IDs.
+    """
+
+    def setUp(self):
+        self.editor = make_user('draft_editor', 'draft_editor@example.com', role='editor')
+        self.reader = make_user('draft_reader', 'draft_reader@example.com', role='reader')
+
+    def _post_with_comment(self, slug, status):
+        post = make_post('Draft Post', self.editor, status=status, slug=slug)
+        Comment.objects.create(post=post, author=self.reader, content_json=LEXICAL_JSON)
+        return post
+
+    def _get(self, post):
+        return Client().get(f'/api/blog/posts/{post.id}/comments/')
+
+    def test_draft_post_comments_invisible_to_anonymous(self):
+        post = self._post_with_comment('vis-draft', 'draft')
+        self.assertEqual(self._get(post).status_code, 404)
+
+    def test_scheduled_post_comments_invisible_to_anonymous(self):
+        post = self._post_with_comment('vis-scheduled', 'scheduled')
+        self.assertEqual(self._get(post).status_code, 404)
+
+    def test_archived_post_comments_invisible_to_anonymous(self):
+        post = self._post_with_comment('vis-archived', 'archived')
+        self.assertEqual(self._get(post).status_code, 404)
+
+    def test_draft_post_comments_invisible_to_other_user(self):
+        """Even a logged-in non-owner gets 404 — not just anonymous callers."""
+        post = self._post_with_comment('vis-draft-auth', 'draft')
+        other = make_user('other_reader', 'other_reader@example.com', role='reader')
+        r = jwt_client(other).get(f'/api/blog/posts/{post.id}/comments/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_published_post_comments_still_visible(self):
+        post = self._post_with_comment('vis-published', 'published')
+        r = self._get(post)
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(len(json.loads(r.content)), 1)
+
+    def test_draft_post_detail_still_protected(self):
+        """The by-slug detail endpoint was already filtered; guard against regression."""
+        post = self._post_with_comment('vis-detail', 'draft')
+        self.assertEqual(Client().get(f'/api/blog/posts/{post.slug}/').status_code, 404)
+
+
+# ---------------------------------------------------------------------------
 # Rate Limiting Tests
 # ---------------------------------------------------------------------------
 

@@ -417,7 +417,7 @@ class CommentController:
     )
     def list_comments(self, post_id: int) -> List[CommentOut]:
         """Public endpoint — returns all comments as a nested tree."""
-        post = get_object_or_404(BlogPost, id=post_id)
+        post = get_object_or_404(BlogPost, id=post_id, status='published')
         return _build_comment_tree(post)
 
     @http_post(

@@ -5,6 +5,7 @@ from django.test import TestCase
 from django.contrib.auth.models import User
 from auth_app.models import UserProfile
 from .models import Recipe, RecipeIngredient, RecipeInstruction, RecipeRating, DietaryLabel
+from blog.models import Comment
 import json
 
 
@@ -351,3 +352,72 @@ class RecipeCommentTests(TestCase):
             content_type='application/json',
         )
         self.assertEqual(resp.status_code, 401)
+
+
+class UnpublishedRecipeVisibilityTests(TestCase):
+    """
+    Regression: GET /api/recipes/{id}/comments/ and GET /api/recipes/{id}/rating/
+    had no status filter, so an anonymous caller could read comments and rating
+    aggregates on drafts by guessing sequential IDs.
+    """
+
+    def setUp(self):
+        self.editor = make_user('rdraft_editor')
+        self.reader = make_user('rdraft_reader', role='reader')
+        self.comment_json = json.dumps({
+            'root': {'children': [{'type': 'paragraph', 'children': [{'type': 'text', 'text': 'Draft comment'}]}]}
+        })
+
+    def _recipe_with_data(self, slug, status):
+        recipe = Recipe.objects.create(
+            title=f'Recipe {slug}', slug=slug, author=self.editor, status=status,
+        )
+        Comment.objects.create(recipe=recipe, author=self.reader, content_json=self.comment_json)
+        RecipeRating.objects.create(recipe=recipe, user=self.reader, score=5)
+        return recipe
+
+    def test_draft_recipe_comments_invisible_to_anonymous(self):
+        recipe = self._recipe_with_data('rvis-draft-c', 'draft')
+        resp = self.client.get(f'/api/recipes/{recipe.id}/comments/')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_draft_recipe_rating_invisible_to_anonymous(self):
+        recipe = self._recipe_with_data('rvis-draft-r', 'draft')
+        resp = self.client.get(f'/api/recipes/{recipe.id}/rating/')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_scheduled_recipe_comments_invisible_to_anonymous(self):
+        recipe = self._recipe_with_data('rvis-sched-c', 'scheduled')
+        resp = self.client.get(f'/api/recipes/{recipe.id}/comments/')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_scheduled_recipe_rating_invisible_to_anonymous(self):
+        recipe = self._recipe_with_data('rvis-sched-r', 'scheduled')
+        resp = self.client.get(f'/api/recipes/{recipe.id}/rating/')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_archived_recipe_rating_invisible_to_anonymous(self):
+        recipe = self._recipe_with_data('rvis-arch-r', 'archived')
+        resp = self.client.get(f'/api/recipes/{recipe.id}/rating/')
+        self.assertEqual(resp.status_code, 404)
+
+    def test_draft_recipe_visible_to_owner(self):
+        """The owner must still be able to preview their own draft."""
+        recipe = self._recipe_with_data('rvis-owner', 'draft')
+        resp = self.client.get(
+            f'/api/recipes/my-recipes/{recipe.id}/',
+            **auth_header(self.client, 'rdraft_editor'),
+        )
+        self.assertEqual(resp.status_code, 200)
+
+    def test_published_recipe_comments_still_visible(self):
+        recipe = self._recipe_with_data('rvis-pub-c', 'published')
+        resp = self.client.get(f'/api/recipes/{recipe.id}/comments/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(len(resp.json()), 1)
+
+    def test_published_recipe_rating_still_visible(self):
+        recipe = self._recipe_with_data('rvis-pub-r', 'published')
+        resp = self.client.get(f'/api/recipes/{recipe.id}/rating/')
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(resp.json()['rating_count'], 1)
