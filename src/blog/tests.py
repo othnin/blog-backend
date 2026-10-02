@@ -7,11 +7,12 @@ via HTTP_AUTHORIZATION on every request using the JWTClient helper.
 Unauthenticated requests return 401 (JWTAuth rejects before any permission check).
 Authenticated-but-unauthorised requests return 403 (IsEditorOrAdmin permission).
 """
-from django.test import TestCase, Client, override_settings
+from django.test import TestCase, SimpleTestCase, Client, override_settings
 from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from io import BytesIO
 import json
+import os
 from unittest.mock import patch
 
 from blog.models import BlogPost, Category, Comment, Tag
@@ -1435,6 +1436,153 @@ class RateLimitCorsHeaderTests(TestCase):
         self.assertEqual(
             r.headers.get('Access-Control-Allow-Origin'), origin
         )
+
+
+@override_settings(
+    RATE_LIMIT_ENABLED=True,
+    CORS_ALLOW_ALL_ORIGINS=False,
+    CORS_ALLOWED_ORIGINS=['https://blog.example.com'],
+)
+class ProductionCorsHeaderTests(TestCase):
+    """
+    CORS behaviour under production-like settings.
+
+    The other CORS test runs with DEBUG=True, where CORS_ALLOW_ALL_ORIGINS=True
+    short-circuits the allow-list. These tests pin the production path, which is
+    the only configuration where an origin mismatch can actually strip headers.
+    """
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.allowed = 'https://blog.example.com'
+        self.blocked = 'https://evil.example.com'
+
+    def _get(self, origin, path='/api/hello'):
+        return Client().get(path, HTTP_ORIGIN=origin)
+
+    def test_allowed_origin_gets_header_on_normal_response(self):
+        r = self._get(self.allowed)
+        self.assertEqual(r.headers.get('Access-Control-Allow-Origin'), self.allowed)
+
+    def test_disallowed_origin_gets_no_header(self):
+        r = self._get(self.blocked)
+        self.assertEqual(r.status_code, 200)
+        self.assertIsNone(r.headers.get('Access-Control-Allow-Origin'))
+
+    def test_allowed_origin_gets_header_on_rate_limited_response(self):
+        """The middleware-generated 429 must still carry CORS headers."""
+        c = Client()
+        r = None
+        for _ in range(101):
+            r = c.get('/api/hello', HTTP_ORIGIN=self.allowed)
+            if r.status_code == 429:
+                break
+        self.assertEqual(r.status_code, 429)
+        self.assertEqual(
+            r.headers.get('Access-Control-Allow-Origin'), self.allowed
+        )
+
+    def test_disallowed_origin_rate_limited_has_no_header(self):
+        c = Client()
+        r = None
+        for _ in range(101):
+            r = c.get('/api/hello', HTTP_ORIGIN=self.blocked)
+            if r.status_code == 429:
+                break
+        self.assertEqual(r.status_code, 429)
+        self.assertIsNone(r.headers.get('Access-Control-Allow-Origin'))
+
+    def test_preflight_options_gets_header(self):
+        """The frontend sends Authorization, so every API call triggers a
+        preflight OPTIONS. If that 200 lacks the header, nothing works."""
+        r = Client().options(
+            '/api/blog/my-posts/',
+            HTTP_ORIGIN=self.allowed,
+            HTTP_ACCESS_CONTROL_REQUEST_METHOD='GET',
+            HTTP_ACCESS_CONTROL_REQUEST_HEADERS='authorization,content-type',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(r.headers.get('Access-Control-Allow-Origin'), self.allowed)
+        self.assertIn(
+            'authorization', r.headers.get('Access-Control-Allow-Headers', '').lower()
+        )
+
+    def test_credentials_header_present(self):
+        """Auth uses HTTP-only cookies, so credentials must be allowed."""
+        r = self._get(self.allowed)
+        self.assertEqual(r.headers.get('Access-Control-Allow-Credentials'), 'true')
+
+    def test_lowercased_allow_list_entry_matches(self):
+        """settings lowercases allow-list entries; browsers lowercase the host.
+
+        Per the WHATWG URL spec an Origin header is serialized with a lowercased
+        scheme and host, so the browser always sends
+        'https://blog.example.com'. The .lower() in settings is therefore
+        required for matching, not optional.
+        """
+        r = self._get('https://blog.example.com')
+        self.assertEqual(
+            r.headers.get('Access-Control-Allow-Origin'),
+            'https://blog.example.com',
+        )
+
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class CacheUrlPlaceholderTests(SimpleTestCase):
+    """
+    An unfilled CACHE_URL placeholder must not select the Redis backend.
+
+    .env.railway.backend ships a human-readable placeholder. Copy-pasted as-is it
+    is truthy, so settings would select Redis and then fail on every cache
+    operation - which breaks rate limiting and, with it, session revocation on
+    suspend. Falling back to LocMemCache degrades gracefully instead.
+    """
+
+    PLACEHOLDER = '<Railway Redis plugin connection string, e.g. redis://default:password@host:port>'
+
+    def _backend_for(self, value):
+        """Reload settings with CACHE_URL set in the environment.
+
+        settings.py reads CACHE_URL via decouple at import time, so
+        override_settings alone cannot influence it.
+        """
+        import importlib
+
+        from home import settings as home_settings
+
+        with patch.dict(os.environ, {'CACHE_URL': value}):
+            reloaded = importlib.reload(home_settings)
+            try:
+                return reloaded.CACHES['default']['BACKEND']
+            finally:
+                # Restore the module for the rest of the suite.
+                importlib.reload(home_settings)
+
+    def test_placeholder_url_falls_back_to_locmem(self):
+        self.assertIn('LocMemCache', self._backend_for(self.PLACEHOLDER))
+
+    def test_real_redis_url_is_honoured(self):
+        self.assertIn('RedisCache', self._backend_for('redis://default:pw@host:6379'))
+
+    def test_empty_url_falls_back(self):
+        self.assertIn('LocMemCache', self._backend_for(''))
+
+    def test_placeholder_does_not_reach_redis_location(self):
+        """The placeholder string must not survive as the Redis LOCATION."""
+        import importlib
+
+        from home import settings as home_settings
+
+        with patch.dict(os.environ, {'CACHE_URL': self.PLACEHOLDER}):
+            reloaded = importlib.reload(home_settings)
+            try:
+                self.assertNotIn(
+                    self.PLACEHOLDER,
+                    str(reloaded.CACHES['default'].get('LOCATION', '')),
+                )
+            finally:
+                importlib.reload(home_settings)
 
 
 @override_settings(RATE_LIMIT_ENABLED=True)

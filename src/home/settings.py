@@ -280,6 +280,23 @@ GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID", cast=str, default="")
 
 # Cache — LocMemCache for development; set CACHE_URL=redis://... for production
 CACHE_URL = config("CACHE_URL", cast=str, default="")
+
+# A copy-pasted placeholder from .env.railway.backend is truthy, so without this
+# guard it selects Redis and then fails on every cache operation at runtime.
+# That breaks rate limiting, and therefore also session revocation on suspend.
+_CACHE_URL_IS_PLACEHOLDER = bool(CACHE_URL) and (
+    "<" in CACHE_URL or ">" in CACHE_URL or "e.g." in CACHE_URL
+)
+if _CACHE_URL_IS_PLACEHOLDER:
+    import logging as _logging
+
+    _logging.getLogger("django").warning(
+        "CACHE_URL looks like an unfilled placeholder rather than a real Redis "
+        "URL; ignoring it and using LocMemCache. Set a real redis:// URL in "
+        "production or rate-limit state will not be shared across instances."
+    )
+    CACHE_URL = ""
+
 if CACHE_URL:
     CACHES = {
         "default": {
