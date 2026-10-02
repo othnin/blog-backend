@@ -19,6 +19,7 @@ from helpers.rate_limit import check_rate_limit
 from helpers.storage import get_presigned_url, is_safe_storage_key
 from ninja import File
 from ninja.files import UploadedFile
+import logging
 import uuid, os
 from .serializers import (
     BlogPostCreateIn,
@@ -45,6 +46,8 @@ from .utils import (
     _author_dict,
     _comment_to_dict,
 )
+
+logger = logging.getLogger('blog')
 
 
 @api_controller("/blog", tags=["Blog"])
@@ -394,8 +397,10 @@ class BlogController:
         try:
             url = get_presigned_url(filename)
             return {"url": url}
-        except Exception as e:
-            raise HttpError(500, f"Failed to generate image URL: {str(e)}")
+        except Exception:
+            # boto3 errors carry the bucket name and endpoint host; keep them in the log.
+            logger.exception('Failed to presign blog image URL for %s', filename)
+            raise HttpError(500, "Failed to generate image URL")
 
 
 # ─── Comment helpers (implemented in blog/utils.py, imported above) ───────────

@@ -2929,3 +2929,53 @@ class SecurityEventsEndpointTests(TestCase):
         data = json.loads(response.content)
         for event in data:
             self.assertEqual(event['event_type'], 'permission_denied')
+
+
+class PresignErrorDisclosureTests(TestCase):
+    """
+    boto3/boto_presigner exceptions carry the bucket name and S3 endpoint host,
+    so they must not be echoed to the client. These endpoints are public (needed
+    for anonymous rendering), so a leaked error is available to anyone.
+    """
+
+    SECRET_DETAIL = (
+        'An error occurred (AccessDenied) when calling the PutObject operation: '
+        'Bucket "my-private-uploads" denies access to '
+        's3.us-east-2.amazonaws.com/my-private-uploads'
+    )
+
+    def _assert_clean(self, response):
+        body = response.content.decode()
+        self.assertNotIn('my-private-uploads', body)
+        self.assertNotIn('amazonaws.com', body)
+        self.assertNotIn('AccessDenied', body)
+        self.assertNotIn('Traceback', body)
+
+    def test_image_url_does_not_leak_storage_internals(self):
+        with patch('blog.api.get_presigned_url', side_effect=RuntimeError(self.SECRET_DETAIL)):
+            r = Client().get('/api/blog/image-url/?filename=blog_images/photo.jpg')
+        self.assertEqual(r.status_code, 500)
+        self._assert_clean(r)
+        self.assertIn('Failed to generate image URL', r.content.decode())
+
+    def test_image_url_500_is_generic_not_exception_text(self):
+        with patch('blog.api.get_presigned_url', side_effect=RuntimeError(self.SECRET_DETAIL)):
+            r = Client().get('/api/blog/image-url/?filename=blog_images/photo.jpg')
+        body = json.loads(r.content)
+        self.assertNotIn(str(self.SECRET_DETAIL), str(body))
+        self.assertNotIn('SecretDetail', str(body))
+
+    def test_avatar_url_does_not_leak_storage_internals(self):
+        with patch('auth_app.api.get_presigned_url', side_effect=RuntimeError(self.SECRET_DETAIL)):
+            r = Client().get('/api/auth/avatar-url?filename=avatars/me.jpg')
+        self.assertEqual(r.status_code, 500)
+        self._assert_clean(r)
+
+    def test_invalid_filename_still_rejected_before_presign(self):
+        """Traversal attempt must 400 before any storage call is attempted."""
+        with patch('blog.api.get_presigned_url') as mock_sign:
+            r = Client().get(
+                '/api/blog/image-url/?filename=blog_images/../../../etc/passwd'
+            )
+        self.assertEqual(r.status_code, 400)
+        mock_sign.assert_not_called()

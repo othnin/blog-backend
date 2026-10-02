@@ -2552,3 +2552,120 @@ class GoogleLoginTest(TestCase):
         data2 = res2.json()
         # Tokens should be different (refresh token rotates)
         self.assertNotEqual(data1['access'], data2['access'])
+
+
+class ErrorDisclosureTests(TestCase):
+    """
+    Internal exception text must never reach the client.
+
+    A raw traceback message handed to a browser discloses table names, DB
+    vendor, file paths and module names - free reconnaissance for anyone who can
+    trigger a failure with ordinary input. The user gets a sentence; the log
+    gets the traceback.
+    """
+
+    # Distinctive markers so we can assert they never appear in a response.
+    SECRET_DETAIL = (
+        'psycopg2.errors.UniqueViolation duplicate key value violates unique '
+        'constraint "auth_app_user_username_key" at /code/src/auth_app/api.py:131'
+    )
+
+    def setUp(self):
+        self.user = User.objects.create_user(
+            username='disclose_user', email='disclose@example.com', password='ValidPass123'
+        )
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+    def _assert_clean(self, response):
+        body = response.content.decode()
+        self.assertNotIn('UniqueViolation', body)
+        self.assertNotIn('auth_app_user_username_key', body)
+        self.assertNotIn('/code/src', body)
+        self.assertNotIn('psycopg2', body)
+        self.assertNotIn('Traceback', body)
+
+    def test_register_does_not_leak_internal_error(self):
+        with patch(
+            'auth_app.api.create_email_verification_token',
+            side_effect=RuntimeError(self.SECRET_DETAIL),
+        ):
+            r = Client().post(
+                '/api/auth/register',
+                data=json.dumps({
+                    'username': 'newcomer1',
+                    'email': 'newcomer1@example.com',
+                    'password': 'ValidPass123',
+                    'password_confirm': 'ValidPass123',
+                }),
+                content_type='application/json',
+            )
+        body = json.loads(r.content)
+        self.assertEqual(body['status'], 'error')
+        self._assert_clean(r)
+        self.assertIn('try again', body['message'].lower())
+
+    def test_login_does_not_leak_internal_error(self):
+        with patch(
+            'django.contrib.auth.authenticate', side_effect=RuntimeError(self.SECRET_DETAIL)
+        ):
+            r = Client().post(
+                '/api/auth/login',
+                data=json.dumps({'username': 'disclose_user', 'password': 'ValidPass123'}),
+                content_type='application/json',
+            )
+        body = json.loads(r.content)
+        self.assertEqual(body['status'], 'error')
+        self._assert_clean(r)
+        self.assertIn('try again', body['message'].lower())
+
+    def test_login_db_outage_does_not_leak_hostname(self):
+        from django.db import OperationalError
+
+        with patch(
+            'django.contrib.auth.authenticate',
+            side_effect=OperationalError(
+                'could not translate host name '
+                '"ep-weathered-surf-ajapwnq5-pooler.c-3.us-east-2.aws.neon.tech"'
+            ),
+        ):
+            r = Client().post(
+                '/api/auth/login',
+                data=json.dumps({'username': 'disclose_user', 'password': 'ValidPass123'}),
+                content_type='application/json',
+            )
+        body = json.loads(r.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertNotIn('neon.tech', r.content.decode())
+        self.assertNotIn('ep-weathered-surf', r.content.decode())
+        self.assertIn('temporarily unavailable', body['message'].lower())
+
+    def test_verify_email_does_not_leak_internal_error(self):
+        with patch(
+            'auth_app.api.EmailVerificationToken.objects.get',
+            side_effect=RuntimeError(self.SECRET_DETAIL),
+        ):
+            r = Client().post(
+                '/api/auth/verify-email',
+                data=json.dumps({'token': 'sometoken'}),
+                content_type='application/json',
+            )
+        self._assert_clean(r)
+
+    def test_password_reset_confirm_does_not_leak_internal_error(self):
+        with patch(
+            'auth_app.models.PasswordResetToken.objects.get',
+            side_effect=RuntimeError(self.SECRET_DETAIL),
+        ):
+            r = Client().post(
+                '/api/auth/password-reset-confirm',
+                data=json.dumps({
+                    'token': 'sometoken',
+                    'new_password': 'NewPass123',
+                    'new_password_confirm': 'NewPass123',
+                }),
+                content_type='application/json',
+            )
+        body = json.loads(r.content)
+        self.assertEqual(body['status'], 'error')
+        self._assert_clean(r)

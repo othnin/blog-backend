@@ -4,7 +4,7 @@ Includes registration, email verification, and password reset.
 """
 from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
-from django.db import transaction
+from django.db import IntegrityError, OperationalError, transaction
 from ninja import Router, Schema, File
 from ninja.files import UploadedFile
 # SuspendAwareJWTAuth rejects suspended users on every request (see helpers/api_auth.py).
@@ -151,10 +151,30 @@ def register(request, data: RegisterSerializer):
             'message': f'Validation error: {error_messages}',
             'user': None
         }
-    except Exception as e:
+    except IntegrityError:
+        # Lost a race against a concurrent registration. Say only that the name
+        # is taken; the DB error would name the table and constraint.
+        logger.info('Registration hit an integrity error (duplicate username/email)')
         return {
             'status': 'error',
-            'message': f'Registration failed: {str(e)}',
+            'message': 'Username or email already exists',
+            'user': None
+        }
+    except OperationalError:
+        # The database is unreachable. That is our outage, not the user's
+        # mistake, and the driver message would leak the hostname and vendor.
+        logger.exception('Registration failed: database unavailable')
+        return {
+            'status': 'error',
+            'message': 'Registration is temporarily unavailable. Please try again.',
+            'user': None
+        }
+    except Exception:
+        # Full traceback to the log, nothing internal to the client.
+        logger.exception('Registration failed for %s', data.username)
+        return {
+            'status': 'error',
+            'message': 'Registration failed. Please try again later.',
             'user': None
         }
 
@@ -224,10 +244,18 @@ def login(request, data: LoginSerializer):
             'user': user_data,
         }
 
-    except Exception as e:
+    except OperationalError:
+        logger.exception('Login failed: database unavailable')
         return {
             'status': 'error',
-            'message': f'Login failed: {str(e)}',
+            'message': 'Login is temporarily unavailable. Please try again.',
+            'user': None
+        }
+    except Exception:
+        logger.exception('Login failed for %s', data.username)
+        return {
+            'status': 'error',
+            'message': 'Login failed. Please try again later.',
             'user': None
         }
 
@@ -346,10 +374,11 @@ def verify_email(request, data: EmailVerificationSerializer):
             'message': 'Verification token not found',
             'user': None
         }
-    except Exception as e:
+    except Exception:
+        logger.exception('Email verification failed')
         return {
             'status': 'error',
-            'message': f'Email verification failed: {str(e)}',
+            'message': 'Email verification failed. Please request a new link.',
             'user': None
         }
 
@@ -387,10 +416,11 @@ def password_reset_request(request, data: PasswordResetRequestSerializer):
             'message': 'If a user with that email exists, a password reset link has been sent to their email address.',
         }
     
-    except Exception as e:
+    except Exception:
+        logger.exception('Password reset request failed')
         return {
             'status': 'error',
-            'message': f'Password reset request failed: {str(e)}',
+            'message': 'Password reset request failed. Please try again later.',
         }
 
 
@@ -445,10 +475,11 @@ def password_reset_confirm(request, data: PasswordResetConfirmSerializer):
             'status': 'error',
             'message': f'Validation error: {error_messages}',
         }
-    except Exception as e:
+    except Exception:
+        logger.exception('Password reset failed')
         return {
             'status': 'error',
-            'message': f'Password reset failed: {str(e)}',
+            'message': 'Password reset failed. Please try again later.',
         }
 
 class ResendVerificationSchema(Schema):
@@ -630,8 +661,10 @@ def get_avatar_url(request, filename: str):
     try:
         url = get_presigned_url(filename)
         return {"url": url}
-    except Exception as e:
-        raise HttpError(500, f"Failed to generate avatar URL: {str(e)}")
+    except Exception:
+        # boto3 errors carry the bucket name and endpoint host; keep them in the log.
+        logger.exception('Failed to presign avatar URL for %s', filename)
+        raise HttpError(500, "Failed to generate avatar URL")
 
 
 @router.post("/change-password", auth=JWTAuth())
