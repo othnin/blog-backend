@@ -1,0 +1,34 @@
+# Railway builds from the GitHub repo, so a checkout already contains only
+# committed files — this venv and these secrets are gitignored and never reach
+# the build. This file matters when building locally or deploying with
+# `railway up` from a checkout, which uses the working directory as-is.
+
+# Root-only entries.
+.venv
+venv/
+env/
+.git
+logs/
+
+# Secrets: runtime values come from Railway service variables, never from files
+# in the image. Patterns are anchored with ** because Docker matches with Go's
+# filepath.Match, where a bare * does not cross a directory separator.
+.env
+.env.*
+!.env.sample
+**/.env
+**/.env.*
+!**/.env.sample
+
+# Nested dev artefacts. `*.sqlite3` alone would NOT match src/db.sqlite3.
+**/*.sqlite3
+**/*.db
+**/__pycache__/
+**/*.py[cod]
+**/logs/
+**/.pytest_cache/
+**/.DS_Store
+.idea/
+.vscode/
+*.md
+!README.md
