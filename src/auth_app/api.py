@@ -7,7 +7,8 @@ from django.core.exceptions import ValidationError
 from django.db import transaction
 from ninja import Router, Schema, File
 from ninja.files import UploadedFile
-from ninja_jwt.authentication import JWTAuth
+# SuspendAwareJWTAuth rejects suspended users on every request (see helpers/api_auth.py).
+from helpers.api_auth import SuspendAwareJWTAuth as JWTAuth
 from pydantic import ValidationError as PydanticValidationError
 from typing import Optional
 import helpers
@@ -175,6 +176,10 @@ def login(request, data: LoginSerializer):
     Note: This endpoint validates email verification status.
     Use /api/token/pair for JWT token generation.
     """
+    # Shares the "login" key with /api/token/pair so an attacker cannot double
+    # their attempt budget by splitting across both endpoints.
+    check_rate_limit(request, key="login", max_requests=5, period=600)
+
     try:
         from django.contrib.auth import authenticate
         
@@ -185,6 +190,16 @@ def login(request, data: LoginSerializer):
             return {
                 'status': 'error',
                 'message': 'Invalid credentials',
+                'user': None
+            }
+
+        # A suspended user must not be able to log in. Admin accounts are exempt
+        # (see helpers.api_auth.is_suspended).
+        if helpers.api_auth.is_suspended(user):
+            logger.warning(f'Login blocked - suspended user: {user.username}')
+            return {
+                'status': 'error',
+                'message': 'Your account has been suspended. Contact an administrator.',
                 'user': None
             }
         
@@ -259,6 +274,16 @@ def google_login(request, payload: GoogleLoginSchema):
         profile.email_verified = True
         profile.save(update_fields=['email_verified'])
 
+    # Google login is a separate token-issuing path from /api/auth/login and
+    # must honour suspension too, otherwise a suspended user could keep
+    # re-authenticating via Google.
+    if helpers.api_auth.is_suspended(user):
+        logger.warning(f'Google login blocked - suspended user: {user.username}')
+        return {
+            "status": "error",
+            "message": "Your account has been suspended. Contact an administrator.",
+        }
+
     refresh = RefreshToken.for_user(user)
     return {
         "status": "success",
@@ -279,6 +304,9 @@ def verify_email(request, data: EmailVerificationSerializer):
     - Returns user data on successful verification
     - Returns error message if token is invalid or expired
     """
+    # Tokens are high-entropy, so this bounds automated guessing rather than
+    # making it infeasible.
+    check_rate_limit(request, key="verify_email", max_requests=10, period=600)
     try:
         token_obj = EmailVerificationToken.objects.get(token=data.token)
         
@@ -337,6 +365,9 @@ def password_reset_request(request, data: PasswordResetRequestSerializer):
     Response:
     - Always returns success message for security (prevents email enumeration)
     """
+    # Without this, an attacker can trigger unlimited reset emails to a known
+    # address (email bombing / reputation abuse of the sending domain).
+    check_rate_limit(request, key="password_reset_request", max_requests=5, period=3600)
     try:
         try:
             user = User.objects.get(email=data.email)
@@ -377,6 +408,9 @@ def password_reset_confirm(request, data: PasswordResetConfirmSerializer):
     - Returns success message on successful reset
     - Returns error message if token is invalid or expired
     """
+    # Tightest limit of the auth endpoints: a successful guess here resets a
+    # password, so keep automated attempts low.
+    check_rate_limit(request, key="password_reset_confirm", max_requests=5, period=600)
     try:
         token_obj = PasswordResetToken.objects.get(token=data.token)
         

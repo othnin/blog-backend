@@ -77,12 +77,16 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     "django.middleware.security.SecurityMiddleware",
+    # CorsMiddleware must sit above any middleware that can generate a response
+    # (rate limiting, SSL redirect). If it is lower in the stack its headers are
+    # never attached to those responses and the browser reports an opaque CORS
+    # error instead of the real status code.
+    "corsheaders.middleware.CorsMiddleware",
     "helpers.middleware.SSLRedirectMiddleware",
     "csp.middleware.CSPMiddleware",
     "helpers.middleware.GlobalRateLimitMiddleware",
     "whitenoise.middleware.WhiteNoiseMiddleware",
     "django.contrib.sessions.middleware.SessionMiddleware",
-    "corsheaders.middleware.CorsMiddleware",
     "django.middleware.common.CommonMiddleware",
     "django.middleware.csrf.CsrfViewMiddleware",
     "django.contrib.auth.middleware.AuthenticationMiddleware",

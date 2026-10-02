@@ -2133,6 +2133,191 @@ class RegisterRateLimitTests(TestCase):
         self.assertNotEqual(self._post(100, ip='10.1.0.2').status_code, 429)
 
 
+@override_settings(RATE_LIMIT_ENABLED=True)
+class AuthLoginRateLimitTests(TestCase):
+    """
+    Regression: POST /api/auth/login had no rate limit, leaving an unthrottled
+    credential-stuffing path even though /api/token/pair was limited.
+    """
+
+    URL = '/api/auth/login'
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+        User.objects.create_user(
+            username='rl_login', email='rl_login@example.com', password='ValidPass123'
+        )
+
+    def _post(self, ip='10.2.0.1', username='rl_login', password='ValidPass123'):
+        return self.client.post(
+            self.URL,
+            data=json.dumps({'username': username, 'password': password}),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_login_is_rate_limited(self):
+        """The 6th attempt in the window returns 429."""
+        for _ in range(5):
+            self._post()
+        self.assertEqual(self._post().status_code, 429)
+
+    def test_valid_credentials_allowed_within_limit(self):
+        """Correct credentials still work inside the limit — no lockout of real users."""
+        for _ in range(5):
+            self.assertEqual(self._post().status_code, 200)
+
+    def test_brute_force_is_throttled(self):
+        """Wrong-password spraying stops after 5 attempts."""
+        for _ in range(5):
+            self._post(password='wrongpassword')
+        self.assertEqual(self._post(password='wrongpassword').status_code, 429)
+
+    def test_shares_budget_with_token_pair(self):
+        """
+        Both login endpoints use the same 'login' key, so splitting attempts
+        across them does not double the budget.
+        """
+        for _ in range(5):
+            self._post()
+        # Now try the other login endpoint from the same IP
+        r = self.client.post(
+            '/api/token/pair',
+            data=json.dumps({'username': 'rl_login', 'password': 'ValidPass123'}),
+            content_type='application/json',
+            REMOTE_ADDR='10.2.0.1',
+        )
+        self.assertEqual(r.status_code, 429)
+
+    def test_429_body_shape(self):
+        for _ in range(5):
+            self._post()
+        body = json.loads(self._post().content)
+        self.assertIn('detail', body)
+        self.assertIn('seconds', body['detail'])
+
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class VerifyEmailRateLimitTests(TestCase):
+    """Rate limiting on POST /api/auth/verify-email (10 per 10 min per IP)."""
+
+    URL = '/api/auth/verify-email'
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+
+    def _post(self, ip='10.3.0.1'):
+        return self.client.post(
+            self.URL,
+            data=json.dumps({'token': 'bogus-token-value'}),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_token_guessing_is_throttled(self):
+        """Unbounded token guessing returns 429 on the 11th attempt."""
+        for _ in range(10):
+            self.assertEqual(self._post().status_code, 200)
+        self.assertEqual(self._post().status_code, 429)
+
+    def test_different_ips_have_independent_buckets(self):
+        for _ in range(10):
+            self._post(ip='10.3.0.1')
+        self.assertEqual(self._post(ip='10.3.0.1').status_code, 429)
+        self.assertNotEqual(self._post(ip='10.3.0.2').status_code, 429)
+
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class PasswordResetConfirmRateLimitTests(TestCase):
+    """Rate limiting on POST /api/auth/password-reset-confirm (5 per 10 min per IP)."""
+
+    URL = '/api/auth/password-reset-confirm'
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+
+    def _post(self, ip='10.4.0.1'):
+        return self.client.post(
+            self.URL,
+            data=json.dumps({
+                'token': 'bogus-token-value',
+                'new_password': 'NewPass456',
+                'new_password_confirm': 'NewPass456',
+            }),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_token_guessing_is_throttled(self):
+        for _ in range(5):
+            self.assertEqual(self._post().status_code, 200)
+        self.assertEqual(self._post().status_code, 429)
+
+
+@override_settings(RATE_LIMIT_ENABLED=True)
+class PasswordResetRequestRateLimitTests(TestCase):
+    """
+    Rate limiting on POST /api/auth/password-reset-request (5 per hour per IP).
+    Without this, an attacker can trigger unlimited reset emails to a known
+    address — email bombing and sender-domain reputation damage.
+    """
+
+    URL = '/api/auth/password-reset-request'
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+        self.client = Client()
+        self.user = User.objects.create_user(
+            username='rst_user', email='rst@example.com', password='ValidPass123'
+        )
+
+    def _post(self, ip='10.5.0.1'):
+        return self.client.post(
+            self.URL,
+            data=json.dumps({'email': 'rst@example.com'}),
+            content_type='application/json',
+            REMOTE_ADDR=ip,
+        )
+
+    def test_email_bombing_is_throttled(self):
+        for _ in range(5):
+            self.assertEqual(self._post().status_code, 200)
+        self.assertEqual(self._post().status_code, 429)
+
+    def test_emails_stop_after_limit(self):
+        for _ in range(5):
+            self._post()
+        self._post()
+        self.assertLessEqual(len(mail.outbox), 5)
+
+    def test_unknown_email_also_consumes_budget(self):
+        """
+        Throttling must apply regardless of whether the address exists,
+        so the limit can't be used to probe for valid accounts.
+        """
+        for _ in range(5):
+            self.client.post(
+                self.URL,
+                data=json.dumps({'email': 'nobody@example.com'}),
+                content_type='application/json',
+                REMOTE_ADDR='10.5.0.2',
+            )
+        r = self.client.post(
+            self.URL,
+            data=json.dumps({'email': 'nobody@example.com'}),
+            content_type='application/json',
+            REMOTE_ADDR='10.5.0.2',
+        )
+        self.assertEqual(r.status_code, 429)
+
+
 class ResendVerificationTests(TestCase):
     """Tests for POST /api/auth/resend-verification."""
 

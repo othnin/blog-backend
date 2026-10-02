@@ -8,7 +8,8 @@ import os
 from ninja.errors import HttpError
 from ninja_extra import api_controller, http_get, http_post, http_put, http_patch, http_delete
 from ninja_extra.permissions import IsAuthenticated
-from ninja_jwt.authentication import JWTAuth
+# SuspendAwareJWTAuth rejects suspended users on every request (see helpers/api_auth.py).
+from helpers.api_auth import SuspendAwareJWTAuth as JWTAuth
 from django.shortcuts import get_object_or_404
 from django.contrib.auth.models import User
 from django.core.files.storage import default_storage
@@ -26,6 +27,7 @@ from recipes.models import Recipe
 from ninja import File
 from ninja.files import UploadedFile
 from helpers.storage import get_presigned_url_or_none
+from .security_utils import log_security_event
 from .serializers import (
     AdminDashboardOut,
     AdminUserOut,
@@ -49,6 +51,36 @@ from .serializers import (
 )
 
 logger = logging.getLogger('blog')
+
+
+def _revoke_user_sessions(user, request):
+    """Blacklist every outstanding refresh token for a user.
+
+    Immediate revocation of the access token the user is currently holding is not
+    possible without server-side state — JWTs are self-contained. SuspendAwareJWTAuth
+    handles that case by rejecting the user on every request.
+    """
+    try:
+        from ninja_jwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+    except ImportError:
+        logger.warning('token_blacklist not installed; cannot revoke sessions for %s', user.id)
+        return
+
+    for token in OutstandingToken.objects.filter(user=user):
+        try:
+            BlacklistedToken.objects.get_or_create(token=token)
+        except Exception:
+            logger.exception('Failed to blacklist token %s for user %s', token.id, user.id)
+
+    log_security_event(
+        'permission_denied',
+        request=request,
+        user=user,
+        message=f'Sessions revoked for suspended user {user.username}',
+        details={'user_id': user.id, 'action': 'suspend'},
+        severity='critical',
+    )
+    logger.info(f'Revoked outstanding sessions for suspended user {user.username}')
 
 
 def _build_user_out(user) -> AdminUserOut:
@@ -385,14 +417,30 @@ class AdminController:
 
     @http_patch("/users/{user_id}/suspend/", response=AdminUserOut)
     def suspend_user(self, user_id: int, payload: AdminUserSuspendIn) -> AdminUserOut:
-        """Suspend or unsuspend a user."""
+        """Suspend or unsuspend a user.
+
+        Suspending revokes the user's sessions: outstanding refresh tokens are
+        blacklisted so no new access tokens can be minted. Already-issued access
+        tokens keep working until they expire, so SuspendAwareJWTAuth also
+        rejects them on every request (see helpers/api_auth.py).
+
+        Admin accounts cannot be suspended — an admin could otherwise suspend
+        every other admin and lock everyone out.
+        """
         user = get_object_or_404(User.objects.select_related('profile'), id=user_id)
         request = self.context.request
         if user.id == request.user.id:
             raise HttpError(400, "You cannot suspend yourself")
+        if user.profile.role == 'admin':
+            raise HttpError(400, "You cannot suspend an admin account")
+
         user.profile.is_suspended = payload.is_suspended
         user.profile.suspend_reason = payload.suspend_reason or ''
         user.profile.save(update_fields=['is_suspended', 'suspend_reason'])
+
+        if payload.is_suspended:
+            _revoke_user_sessions(user, request)
+
         return _build_user_out(user)
 
     @http_delete("/users/{user_id}/")

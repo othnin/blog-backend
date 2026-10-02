@@ -14,7 +14,8 @@ This ensures Django's URL resolver tries static paths before dynamic ones.
 from ninja.errors import HttpError
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
 from ninja_extra.permissions import IsAuthenticated
-from ninja_jwt.authentication import JWTAuth
+# SuspendAwareJWTAuth rejects suspended users on every request (see helpers/api_auth.py).
+from helpers.api_auth import SuspendAwareJWTAuth as JWTAuth
 from blog.permissions import IsEditorOrAdmin
 from blog.models import Comment, Tag
 from blog.utils import build_comment_tree, _comment_to_dict

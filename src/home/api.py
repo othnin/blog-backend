@@ -1,5 +1,6 @@
 import helpers
 import json
+import logging
 import os
 from helpers.rate_limit import check_rate_limit
 from ninja import NinjaAPI, Schema, Router
@@ -8,8 +9,9 @@ from typing import Optional
 
 from ninja_extra import NinjaExtraAPI
 from ninja_jwt.authentication import JWTAuth
-from ninja_jwt.tokens import RefreshToken
+from ninja_jwt.settings import api_settings
 from ninja_jwt.settings import api_settings as jwt_settings
+from ninja_jwt.tokens import RefreshToken
 from auth_app.api import router as auth_router
 from blog.api import BlogController, CommentController
 from blog.admin_api import AdminController
@@ -20,6 +22,8 @@ from django.contrib.auth import authenticate
 from django.conf import settings
 
 api = NinjaExtraAPI()
+
+logger = logging.getLogger('auth_app')
 
 # Override validation error response
 original_on_exception = api.on_exception
@@ -89,6 +93,15 @@ def obtain_token_pair(request, data: LoginSerializer):
         logger.warning(f'[TOKEN_PAIR] Auth failed - invalid credentials for: {data.username}')
         return JsonResponse({'detail': 'Invalid username/email or password'}, status=401)
 
+    # A suspended user must not be able to mint new tokens. Admin accounts are
+    # exempt (see helpers.api_auth.is_suspended).
+    if helpers.api_auth.is_suspended(user):
+        logger.warning(f'[TOKEN_PAIR] Login blocked - suspended user: {user.username}')
+        return JsonResponse(
+            {'detail': 'Your account has been suspended. Contact an administrator.'},
+            status=403
+        )
+
     # Check if email is verified
     logger.debug(f'[TOKEN_PAIR] Checking email verification for user: {user.username}')
     try:
@@ -120,6 +133,22 @@ def obtain_token_pair(request, data: LoginSerializer):
     }
 
 
+def _user_from_token(token):
+    """Resolve the User behind a JWT payload, or None if the user is gone.
+
+    Read from the payload claim rather than a `.user` attribute, which RefreshToken
+    does not have. Uses select_related so the suspension check costs one query.
+    """
+    from django.contrib.auth.models import User
+
+    user_id = token[api_settings.USER_ID_CLAIM]
+    return (
+        User.objects.select_related('profile')
+        .filter(id=user_id)
+        .first()
+    )
+
+
 @token_router.post("/refresh")
 def refresh_token_view(request, data: RefreshTokenIn):
     """
@@ -129,6 +158,24 @@ def refresh_token_view(request, data: RefreshTokenIn):
     """
     try:
         token = RefreshToken(data.refresh)
+
+        # Suspended users must not be able to mint new access tokens. Normally
+        # their refresh tokens are blacklisted at suspension time, but this
+        # covers tokens issued before the blacklist app was available.
+        # The user id lives in the token payload as a claim - RefreshToken has no
+        # `.user` attribute.
+        if helpers.api_auth.is_suspended(
+            _user_from_token(token)
+        ):
+            logger.warning(
+                '[TOKEN_REFRESH] Refresh blocked - suspended user: id=%s',
+                token[api_settings.USER_ID_CLAIM],
+            )
+            return JsonResponse(
+                {'detail': 'Your account has been suspended. Contact an administrator.'},
+                status=403
+            )
+
         access = str(token.access_token)
         response_data = {'access': access}
 

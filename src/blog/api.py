@@ -5,7 +5,8 @@ Handles creation, reading, updating, and deletion of blog posts.
 from ninja.errors import HttpError
 from ninja_extra import api_controller, http_get, http_post, http_put, http_delete
 from ninja_extra.permissions import IsAuthenticated
-from ninja_jwt.authentication import JWTAuth
+# SuspendAwareJWTAuth rejects suspended users on every request (see helpers/api_auth.py).
+from helpers.api_auth import SuspendAwareJWTAuth as JWTAuth
 from .permissions import IsAdmin, IsEditorOrAdmin
 from django.shortcuts import get_object_or_404
 from django.utils import timezone

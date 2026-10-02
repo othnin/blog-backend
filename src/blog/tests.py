@@ -12,6 +12,7 @@ from django.contrib.auth.models import User
 from django.core.files.uploadedfile import SimpleUploadedFile
 from io import BytesIO
 import json
+from unittest.mock import patch
 
 from blog.models import BlogPost, Category, Comment, Tag
 from blog.utils import create_unique_slug, can_edit_post, can_delete_post
@@ -1406,6 +1407,37 @@ class UnpublishedCommentVisibilityTests(TestCase):
 # ---------------------------------------------------------------------------
 
 @override_settings(RATE_LIMIT_ENABLED=True)
+class RateLimitCorsHeaderTests(TestCase):
+    """
+    A rate-limited request must still carry CORS headers.
+
+    GlobalRateLimitMiddleware short-circuits and returns a JsonResponse without
+    ever reaching the view. If CorsMiddleware sits below it in the stack, its
+    headers are never attached and the browser surfaces an opaque CORS error
+    instead of the real 429 - leaving the frontend unable to show a message or
+    back off correctly.
+    """
+
+    def setUp(self):
+        from django.core.cache import cache
+        cache.clear()
+
+    def test_global_429_response_has_cors_headers(self):
+        c = Client()
+        origin = 'https://blog.example.com'
+        r = None
+        # Global limit is 100/min per IP; the 101st request is rejected.
+        for _ in range(101):
+            r = c.get('/api/hello', HTTP_ORIGIN=origin)
+            if r.status_code == 429:
+                break
+        self.assertEqual(r.status_code, 429)
+        self.assertEqual(
+            r.headers.get('Access-Control-Allow-Origin'), origin
+        )
+
+
+@override_settings(RATE_LIMIT_ENABLED=True)
 class BlogCommentRateLimitTests(TestCase):
     """Tests for rate limiting on blog comment creation (5 per hour per user)."""
 
@@ -1810,6 +1842,17 @@ class AdminUserManagementTests(TestCase):
         )
         self.assertEqual(r.status_code, 400)
 
+    def test_admin_cannot_suspend_another_admin(self):
+        other_admin = make_user('admin_two', 'admin2@example.com', role='admin')
+        r = self.admin_client.patch(
+            f'/api/admin/users/{other_admin.id}/suspend/',
+            data=json.dumps({'is_suspended': True}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 400)
+        other_admin.profile.refresh_from_db()
+        self.assertFalse(other_admin.profile.is_suspended)
+
     def test_delete_user(self):
         r = self.admin_client.delete(f'/api/admin/users/{self.reader.id}/')
         self.assertEqual(r.status_code, 200)
@@ -1823,6 +1866,251 @@ class AdminUserManagementTests(TestCase):
     def test_non_admin_cannot_list_users(self):
         r = jwt_client(self.editor).get('/api/admin/users/')
         self.assertEqual(r.status_code, 403)
+
+
+class UserSuspensionTests(TestCase):
+    """
+    Suspension must actually revoke access, not just block future logins.
+
+    A JWT access token is self-contained and stays valid for its full lifetime
+    regardless of database state, so revoking a session requires BOTH a
+    blacklisted refresh token AND a per-request check (SuspendAwareJWTAuth).
+    """
+
+    def setUp(self):
+        self.admin = make_user('susp_admin', 'susp_admin@example.com', role='admin')
+        self.user = make_user('susp_user', 'susp_user@example.com')
+        # Log in first: the client holds a valid token pair before suspension.
+        self.client_user = jwt_client(self.user)
+        self.admin_client = jwt_client(self.admin)
+
+    def suspend(self, user, reason='Spam'):
+        return self.admin_client.patch(
+            f'/api/admin/users/{user.id}/suspend/',
+            data=json.dumps({'is_suspended': True, 'suspend_reason': reason}),
+            content_type='application/json',
+        )
+
+    # --- existing sessions -------------------------------------------------
+
+    def test_existing_access_token_rejected_after_suspension(self):
+        self.assertEqual(self.client_user.get('/api/blog/my-posts/').status_code, 200)
+        self.suspend(self.user)
+        r = self.client_user.get('/api/blog/my-posts/')
+        self.assertEqual(r.status_code, 401)
+        self.assertIn('suspended', json.loads(r.content)['detail'].lower())
+
+    def test_existing_token_rejected_on_write_endpoint(self):
+        """Writes must be blocked too - suspension is not read-only."""
+        self.suspend(self.user)
+        r = self.client_user.post(
+            '/api/blog/posts/',
+            data=json.dumps({'title': 'Sneaky', 'content_json': LEXICAL_JSON}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 401)
+
+    def test_suspension_blacklists_refresh_tokens(self):
+        from ninja_jwt.token_blacklist.models import BlacklistedToken, OutstandingToken
+        before = OutstandingToken.objects.filter(user=self.user).count()
+        self.assertGreater(before, 0)
+        self.suspend(self.user)
+        remaining = OutstandingToken.objects.filter(
+            user=self.user, blacklistedtoken__isnull=True
+        ).count()
+        blacklisted = BlacklistedToken.objects.filter(
+            token__user=self.user
+        ).count()
+        self.assertEqual(remaining, 0)
+        self.assertEqual(blacklisted, before)
+
+    def test_refresh_blacklisted_by_suspension(self):
+        c = Client()
+        login = c.post(
+            '/api/token/pair',
+            data=json.dumps({'username': self.user.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        refresh = json.loads(login.content)['refresh']
+        self.suspend(self.user)
+        r = c.post(
+            '/api/token/refresh',
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 401)
+
+    def test_refresh_guard_blocks_when_token_not_blacklisted(self):
+        """Second layer: the suspension check in the view itself.
+
+        The blacklist normally rejects the token first. Removing the blacklist
+        entry simulates a token issued before the blacklist app existed, proving
+        the view-level guard also refuses to mint an access token.
+        """
+        from ninja_jwt.token_blacklist.models import BlacklistedToken
+
+        c = Client()
+        login = c.post(
+            '/api/token/pair',
+            data=json.dumps({'username': self.user.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        refresh = json.loads(login.content)['refresh']
+        self.suspend(self.user)
+        BlacklistedToken.objects.filter(token__user=self.user).delete()
+        r = c.post(
+            '/api/token/refresh',
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    # --- logins ------------------------------------------------------------
+
+    def test_login_blocked_after_suspension(self):
+        self.suspend(self.user)
+        c = Client()
+        r = c.post(
+            '/api/token/pair',
+            data=json.dumps({'username': self.user.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 403)
+        self.assertIn('suspended', json.loads(r.content)['detail'].lower())
+
+    def test_login_blocked_by_email_too(self):
+        self.suspend(self.user)
+        c = Client()
+        r = c.post(
+            '/api/token/pair',
+            data=json.dumps({'username': 'susp_user@example.com', 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 403)
+
+    def test_auth_login_blocked_after_suspension(self):
+        self.suspend(self.user)
+        c = Client()
+        r = c.post(
+            '/api/auth/login',
+            data=json.dumps({'username': self.user.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        body = json.loads(r.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIn('suspended', body['message'].lower())
+
+    def test_refresh_still_works_for_active_user(self):
+        """Regression: the suspension check must not break normal refresh."""
+        c = Client()
+        login = c.post(
+            '/api/token/pair',
+            data=json.dumps({'username': self.user.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        refresh = json.loads(login.content)['refresh']
+        r = c.post(
+            '/api/token/refresh',
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertIn('access', json.loads(r.content))
+
+    def test_google_login_blocked_after_suspension(self):
+        """Google OAuth is a separate token path and must honour suspension."""
+        with patch('auth_app.api.id_token.verify_oauth2_token') as mock_verify:
+            mock_verify.return_value = {
+                'email': self.user.email,
+                'email_verified': True,
+            }
+            self.suspend(self.user)
+            r = Client().post(
+                '/api/auth/google-login',
+                data=json.dumps({'credential': 'fake-google-token'}),
+                content_type='application/json',
+            )
+        body = json.loads(r.content)
+        self.assertEqual(body['status'], 'error')
+        self.assertIn('suspended', body['message'].lower())
+        self.assertNotIn('access', body)
+
+    def test_google_login_allowed_when_active(self):
+        with patch('auth_app.api.id_token.verify_oauth2_token') as mock_verify:
+            mock_verify.return_value = {
+                'email': self.user.email,
+                'email_verified': True,
+            }
+            r = Client().post(
+                '/api/auth/google-login',
+                data=json.dumps({'credential': 'fake-google-token'}),
+                content_type='application/json',
+            )
+        self.assertEqual(json.loads(r.content)['status'], 'success')
+
+    # --- admin exemption ---------------------------------------------------
+
+    def test_admin_never_suspended_by_flag(self):
+        """Admins are exempt even if the flag is somehow set in the DB."""
+        self.admin.profile.is_suspended = True
+        self.admin.profile.save()
+        self.admin.profile.refresh_from_db()
+        r = self.admin_client.get('/api/admin/users/')
+        self.assertEqual(r.status_code, 200)
+
+    def test_admin_can_still_login_when_flag_set(self):
+        self.admin.profile.is_suspended = True
+        self.admin.profile.save()
+        c = Client()
+        r = c.post(
+            '/api/token/pair',
+            data=json.dumps({'username': self.admin.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+
+    # --- recovery ----------------------------------------------------------
+
+    def test_unsuspension_restores_access(self):
+        self.suspend(self.user)
+        self.assertEqual(self.client_user.get('/api/blog/my-posts/').status_code, 401)
+        r = self.admin_client.patch(
+            f'/api/admin/users/{self.user.id}/suspend/',
+            data=json.dumps({'is_suspended': False}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 200)
+        self.assertEqual(self.client_user.get('/api/blog/my-posts/').status_code, 200)
+
+    def test_unsuspend_does_not_reissue_blacklisted_refresh_token(self):
+        """Un-suspending restores access but old sessions stay dead."""
+        c = Client()
+        login = c.post(
+            '/api/token/pair',
+            data=json.dumps({'username': self.user.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        refresh = json.loads(login.content)['refresh']
+        self.suspend(self.user)
+        self.admin_client.patch(
+            f'/api/admin/users/{self.user.id}/suspend/',
+            data=json.dumps({'is_suspended': False}),
+            content_type='application/json',
+        )
+        r = c.post(
+            '/api/token/refresh',
+            data=json.dumps({'refresh': refresh}),
+            content_type='application/json',
+        )
+        self.assertEqual(r.status_code, 401)
+        # A fresh login works.
+        c2 = Client()
+        r2 = c2.post(
+            '/api/token/pair',
+            data=json.dumps({'username': self.user.username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        self.assertEqual(r2.status_code, 200)
 
 
 class AdminPostModerationTests(TestCase):
