@@ -32,13 +32,27 @@ DEBUG = config("DJANGO_DEBUG", cast=bool, default=False)
 # SSLRedirectMiddleware force an HTTPS redirect on every test request.
 FORCE_HTTPS_REDIRECT = not DEBUG
 
-ALLOWED_HOSTS = config("ALLOWED_HOSTS_STR", cast=str, default=".railway.app").split(",")
-ALLOWED_HOSTS = [h.strip() for h in ALLOWED_HOSTS if h.strip()]
+def _split_csv(value: str):
+    """Parse a comma-separated env var into a list of stripped, non-empty entries."""
+    return [item.strip() for item in value.split(",") if item.strip()]
+
+
+# Host header (the domain the request is addressed to). No scheme, no port.
+# Defaults to Railway's own domains; a custom domain MUST be listed here or
+# every request returns HTTP 400.
+ALLOWED_HOSTS_STR = config("ALLOWED_HOSTS_STR", cast=str, default=".railway.app")
+ALLOWED_HOSTS = _split_csv(ALLOWED_HOSTS_STR)
 if DEBUG:
     ALLOWED_HOSTS = ["*"]
 
-CSRF_ALLOWED_ORIGINS_STR = config("CSRF_ALLOWED_ORIGINS_STR", cast=str, default="http://*.railway.app,https://*.railway.app")
-CSRF_TRUSTED_ORIGINS = [o.strip() for o in CSRF_ALLOWED_ORIGINS_STR.split(",") if o.strip()]
+# Origin header (the site that initiated the request). Requires a scheme,
+# and may include a port. Only relevant for unsafe methods (POST/PUT/DELETE).
+CSRF_ALLOWED_ORIGINS_STR = config(
+    "CSRF_ALLOWED_ORIGINS_STR",
+    cast=str,
+    default="http://*.railway.app,https://*.railway.app",
+)
+CSRF_TRUSTED_ORIGINS = _split_csv(CSRF_ALLOWED_ORIGINS_STR)
 
 # Application definition
 
@@ -285,6 +299,28 @@ if not DEBUG and not CACHE_URL:
         "instances or survive restarts. Set CACHE_URL to a Redis URL in "
         "production."
     )
+
+# Warn if running in production on the Railway-only fallback domains. Once a
+# custom domain is attached these must be overridden or the app breaks in
+# ways that are silent until the moment the domain goes live.
+if not DEBUG:
+    import logging
+    _logger = logging.getLogger("django")
+    if ALLOWED_HOSTS_STR == ".railway.app":
+        _logger.warning(
+            "ALLOWED_HOSTS_STR is not set; falling back to '.railway.app'. "
+            "Requests to any other domain (including a custom domain) will "
+            "return HTTP 400. Set ALLOWED_HOSTS_STR to a comma-separated list "
+            "of domains on the deploying host."
+        )
+    if CSRF_ALLOWED_ORIGINS_STR == "http://*.railway.app,https://*.railway.app":
+        _logger.warning(
+            "CSRF_ALLOWED_ORIGINS_STR is not set; falling back to the "
+            "*.railway.app pattern. Cross-origin POST/PUT/DELETE requests "
+            "from a custom domain will fail CSRF validation. Set "
+            "CSRF_ALLOWED_ORIGINS_STR to a comma-separated list of origins "
+            "(including scheme) on the deploying host."
+        )
 
 # Sentry Error Tracking
 SENTRY_DSN = config("SENTRY_DSN", default="")
