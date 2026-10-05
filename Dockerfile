@@ -42,7 +42,6 @@ COPY ./src /code
 
 # Install the Python project requirements
 RUN pip install -r /tmp/requirements.txt
-RUN pip install gunicorn
 
 # database isn't available during build
 # run any other commands that do not need the database
@@ -64,7 +63,13 @@ RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
     printf "  python manage.py shell -c \"from django.contrib.auth.models import User; u = User.objects.get(username='\$DJANGO_SUPERUSER_USERNAME'); u.set_password('\$DJANGO_SUPERUSER_PASSWORD'); u.save(); u.profile.role='admin'; u.profile.email_verified=True; u.profile.save()\" 2>/dev/null || true\n" >> ./paracord_runner.sh && \
     printf "fi\n" >> ./paracord_runner.sh && \
     printf "echo \"Django setup complete. Starting gunicorn on port \$RUN_PORT...\"\n" >> ./paracord_runner.sh && \
-    printf "gunicorn ${PROJ_NAME}.wsgi:application --bind \"0.0.0.0:\$RUN_PORT\" --workers \"\${WEB_CONCURRENCY:-2}\"\n" >> ./paracord_runner.sh
+    printf "GUNICORN_WORKERS=\"\${WEB_CONCURRENCY:-2}\"\n" >> ./paracord_runner.sh && \
+    printf "GUNICORN_WORKER_CLASS=\"\${GUNICORN_WORKER_CLASS:-gthread}\"\n" >> ./paracord_runner.sh && \
+    printf "GUNICORN_THREADS=\"\${GUNICORN_THREADS:-4}\"\n" >> ./paracord_runner.sh && \
+    printf "GUNICORN_TIMEOUT=\"\${GUNICORN_TIMEOUT:-120}\"\n" >> ./paracord_runner.sh && \
+    printf "GUNICORN_MAX_REQUESTS=\"\${GUNICORN_MAX_REQUESTS:-10000}\"\n" >> ./paracord_runner.sh && \
+    printf "GUNICORN_MAX_REQUESTS_JITTER=\"\${GUNICORN_MAX_REQUESTS_JITTER:-1000}\"\n" >> ./paracord_runner.sh && \
+    printf "exec gunicorn ${PROJ_NAME}.wsgi:application --bind \"0.0.0.0:\$RUN_PORT\" --workers \"\$GUNICORN_WORKERS\" --worker-class \"\$GUNICORN_WORKER_CLASS\" --threads \"\$GUNICORN_THREADS\" --timeout \"\$GUNICORN_TIMEOUT\" --max-requests \"\$GUNICORN_MAX_REQUESTS\" --max-requests-jitter \"\$GUNICORN_MAX_REQUESTS_JITTER\"\n" >> ./paracord_runner.sh
 
 # make the bash script executable
 RUN chmod +x paracord_runner.sh
@@ -75,6 +80,9 @@ RUN apt-get remove --purge -y \
     && apt-get clean \
     && rm -rf /var/lib/apt/lists/*
 
-# Run the Django project via the runtime script
-# when the container starts
-CMD ./paracord_runner.sh
+# Run the Django project via the runtime script when the container starts.
+# Exec form is required, not cosmetic: shell form would make `sh -c` PID 1, so
+# SIGTERM on deploy/restart would go to sh instead of gunicorn and workers would
+# be killed mid-request instead of draining. The script's own `exec gunicorn`
+# then leaves gunicorn as PID 1. Docker flags this in JSONArgsRecommended.
+CMD ["./paracord_runner.sh"]

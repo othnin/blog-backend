@@ -127,3 +127,118 @@ class LoggingResilienceTests(SimpleTestCase):
         gitkeep.parent.mkdir(parents=True, exist_ok=True)
         if not gitkeep.exists():
             gitkeep.touch()
+
+
+class GunicornDeploymentConfigTests(SimpleTestCase):
+    """
+    Guards the production WSGI configuration.
+
+    Two classes of regression are checked here, both of which fail quietly:
+
+    1. An unpinned `pip install gunicorn` in the Dockerfile. It bypasses
+       requirements.txt, so the image stops being reproducible and dependency
+       scanners, which read requirements.txt, never see gunicorn at all.
+    2. Gunicorn left on its defaults. --timeout defaults to 30s, which this app
+       can exceed given image processing and outbound email/S3 calls, and
+       --max-requests defaults to unlimited, so a slow memory leak accumulates
+       for the life of the container.
+    """
+
+    REPO_DIR = SRC_DIR.parent
+    REQUIREMENTS = SRC_DIR.parent / 'requirements.txt'
+    DOCKERFILE = SRC_DIR.parent / 'Dockerfile'
+
+    @classmethod
+    def setUpClass(cls):
+        super().setUpClass()
+        cls.requirements_text = cls.REQUIREMENTS.read_text()
+        cls.dockerfile_text = cls.DOCKERFILE.read_text()
+
+    def test_gunicorn_is_pinned_in_requirements(self):
+        pins = [
+            line.strip()
+            for line in self.requirements_text.splitlines()
+            if line.strip().lower().startswith('gunicorn')
+        ]
+        self.assertEqual(
+            len(pins),
+            1,
+            f'expected exactly one gunicorn pin in requirements.txt, got {pins}',
+        )
+        pin = pins[0]
+        self.assertIn('>=', pin, f'gunicorn needs a lower bound: {pin}')
+        self.assertIn(
+            '<',
+            pin,
+            f'gunicorn needs an upper bound so a major release cannot land '
+            f'untested in production: {pin}',
+        )
+
+    def test_dockerfile_does_not_install_packages_ad_hoc(self):
+        offenders = [
+            line.strip()
+            for line in self.dockerfile_text.splitlines()
+            if 'pip install' in line
+            and '-r' not in line
+            and '--upgrade' not in line
+            and not line.strip().endswith('pip install --upgrade pip')
+        ]
+        self.assertEqual(
+            offenders,
+            [],
+            'packages must be installed via requirements.txt so the build is '
+            f'reproducible and scannable. Offending line(s): {offenders}',
+        )
+
+    def test_gunicorn_launch_sets_tuning_flags(self):
+        launch_lines = [
+            line
+            for line in self.dockerfile_text.splitlines()
+            if 'gunicorn' in line and 'wsgi:application' in line
+        ]
+        self.assertEqual(
+            len(launch_lines),
+            1,
+            f'expected one gunicorn launch line, found {launch_lines}',
+        )
+        launch = launch_lines[0]
+        for flag in (
+            '--workers',
+            '--worker-class',
+            '--threads',
+            '--timeout',
+            '--max-requests',
+            '--max-requests-jitter',
+        ):
+            self.assertIn(
+                flag,
+                launch,
+                f'gunicorn launch is missing {flag}: {launch}',
+            )
+
+    def test_gunicorn_flags_are_env_overridable(self):
+        # Hardcoded values would mean a retune forces a rebuild; each flag reads
+        # from the environment with a default instead.
+        for var in (
+            'GUNICORN_WORKER_CLASS',
+            'GUNICORN_THREADS',
+            'GUNICORN_TIMEOUT',
+            'GUNICORN_MAX_REQUESTS',
+            'GUNICORN_MAX_REQUESTS_JITTER',
+        ):
+            self.assertIn(
+                var,
+                self.dockerfile_text,
+                f'{var} should be overridable without rebuilding the image',
+            )
+
+    def test_worker_class_supports_concurrency(self):
+        # The default worker class is `sync`, which serves exactly one request
+        # per worker at a time. With 2 workers that is 2 concurrent requests
+        # site-wide, and an image upload blocks its worker entirely.
+        self.assertIn('gthread', self.dockerfile_text)
+        self.assertNotIn(
+            '--worker-class sync',
+            self.dockerfile_text,
+            'sync workers serialise the whole site behind 2 connections',
+        )
