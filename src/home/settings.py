@@ -374,7 +374,55 @@ CSP_CONNECT_SRC = ("'self'",)
 CSP_FRAME_ANCESTORS = ("'none'",)
 
 # Logging — console in dev, console + rotating file in production
-_log_handlers = ['console'] if DEBUG else ['console', 'file']
+#
+# The file handler must never be able to take the app down. logging.config
+# opens handler files eagerly inside dictConfig, which runs while Django is
+# importing these settings. If the directory is missing or unwritable, the
+# open raises, the exception propagates out of the settings import, and every
+# gunicorn worker dies before serving anything — so a missing directory turns
+# into a total outage that also masks whatever the real error was.
+#
+# That is not hypothetical: .dockerignore excludes **/logs/, and git cannot
+# track an empty directory, so src/logs/.gitkeep is the only thing that ever
+# created it in the image. Create the directory here instead of relying on it
+# existing, and fall back to console-only if it genuinely cannot be used.
+LOG_DIR = BASE_DIR / 'logs'
+LOG_TO_FILE = config("DJANGO_LOG_TO_FILE", cast=bool, default=not DEBUG)
+
+_file_logging_available = False
+if LOG_TO_FILE:
+    try:
+        LOG_DIR.mkdir(parents=True, exist_ok=True)
+        # Prove it is actually writable now, rather than discovering it is not
+        # from a FileNotFoundError raised inside dictConfig.
+        with open(LOG_DIR / '.write-test', 'w'):
+            pass
+        (LOG_DIR / '.write-test').unlink()
+        _file_logging_available = True
+    except OSError:
+        _file_logging_available = False
+
+_log_handlers = ['console'] + (['file'] if _file_logging_available else [])
+
+# dictConfig instantiates every handler in this mapping, whether or not anything
+# references it, so the file handler must be omitted entirely rather than merely
+# left out of _log_handlers. Verified: defining it while root uses console only
+# still raises and takes the worker down.
+_handlers = {
+    'console': {
+        'class': 'logging.StreamHandler',
+        'formatter': 'verbose',
+    },
+}
+if _file_logging_available:
+    _handlers['file'] = {
+        'class': 'logging.handlers.RotatingFileHandler',
+        'filename': LOG_DIR / 'django.log',
+        'maxBytes': 5 * 1024 * 1024,  # 5 MB per file
+        'backupCount': 3,
+        'formatter': 'verbose',
+    }
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -384,19 +432,7 @@ LOGGING = {
             'style': '{',
         },
     },
-    'handlers': {
-        'console': {
-            'class': 'logging.StreamHandler',
-            'formatter': 'verbose',
-        },
-        'file': {
-            'class': 'logging.handlers.RotatingFileHandler',
-            'filename': BASE_DIR / 'logs' / 'django.log',
-            'maxBytes': 5 * 1024 * 1024,  # 5 MB per file
-            'backupCount': 3,
-            'formatter': 'verbose',
-        },
-    },
+    'handlers': _handlers,
     'root': {
         'handlers': _log_handlers,
         'level': 'WARNING',
