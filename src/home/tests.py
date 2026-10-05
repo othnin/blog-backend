@@ -20,6 +20,7 @@ import shutil
 import subprocess
 import sys
 import textwrap
+import unittest
 from pathlib import Path
 
 from django.conf import settings
@@ -141,6 +142,12 @@ class LoggingResilienceTests(SimpleTestCase):
             gitkeep.touch()
 
 
+@unittest.skipUnless(
+    (SRC_DIR.parent / 'requirements.txt').exists()
+    and (SRC_DIR.parent / 'Dockerfile').exists(),
+    'build files are not present in this environment (e.g. inside the '
+    'image, where only src/ is copied to /code)',
+)
 class GunicornDeploymentConfigTests(SimpleTestCase):
     """
     Guards the production WSGI configuration.

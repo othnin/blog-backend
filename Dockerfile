@@ -13,20 +13,33 @@ ENV PATH=/opt/venv/bin:$PATH
 RUN pip install --upgrade pip
 
 # Set Python-related environment variables
-ENV PYTHONDONTWRITEBYTECODE 1
-ENV PYTHONUNBUFFERED 1
+ENV PYTHONDONTWRITEBYTECODE=1
+ENV PYTHONUNBUFFERED=1
 
-# Install os dependencies for our mini vm
-RUN apt-get update && apt-get install -y \
-    # for postgres
-    libpq-dev \
-    # for Pillow
-    libjpeg-dev \
-    # for CairoSVG
-    libcairo2 \
-    # other
-    gcc \
-    && rm -rf /var/lib/apt/lists/*
+# No apt packages, and deliberately none.
+#
+# This image used to `apt-get install libpq-dev libjpeg-dev libcairo2 gcc`,
+# which added roughly 240 MB of build tooling and -dev headers to the runtime
+# layer. None of it is needed, because every dependency resolves to a prebuilt
+# manylinux wheel, so nothing is ever compiled:
+#
+#   gcc         pip builds no sdist here, so it is never invoked.
+#   libpq-dev   psycopg-binary bundles its own libpq
+#               (psycopg_binary.libs/libpq-*.so.5), resolved from the venv
+#               rather than /usr/lib.
+#   libjpeg-dev Pillow's wheels bundle jpeg, zlib and freetype, confirmed with
+#               PIL.features inside this image.
+#   libcairo2   cairosvg was never in requirements.txt and nothing imports it,
+#               so this pulled in cairo, pixman, fontconfig and X libs for
+#               nothing.
+#
+# Verified after removal: the image builds, boots, serves, and the full test
+# suite passes inside it.
+#
+# If a future dependency ever needs compiling, pip will fail the build loudly
+# with a missing-header error. That is the preferable outcome to a runtime
+# image carrying a compiler, or to a multi-stage build whose venv silently links
+# against a library that was never copied into the final stage.
 
 # Create the mini vm's code directory
 RUN mkdir -p /code
@@ -80,12 +93,6 @@ RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
 
 # make the bash script executable
 RUN chmod +x paracord_runner.sh
-
-# Clean up apt cache to reduce image size
-RUN apt-get remove --purge -y \
-    && apt-get autoremove -y \
-    && apt-get clean \
-    && rm -rf /var/lib/apt/lists/*
 
 # Run the Django project via the runtime script when the container starts.
 # Exec form is required, not cosmetic: shell form would make `sh -c` PID 1, so

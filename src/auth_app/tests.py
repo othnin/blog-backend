@@ -1,7 +1,9 @@
 """
 Unit tests for authentication endpoints and functionality.
 """
-from django.test import TestCase, Client, override_settings
+import mimetypes
+
+from django.test import TestCase, Client, SimpleTestCase, override_settings
 from django.contrib.auth.models import User
 from django.core import mail
 from django.urls import reverse
@@ -17,6 +19,39 @@ from auth_app.utils import (
     create_email_verification_token,
     create_password_reset_token,
 )
+
+# Django's test client derives the part's Content-Type from the uploaded file's
+# *filename* using mimetypes.guess_type(), rather than from a header the way a
+# real multipart upload does. That makes it depend on the host OS MIME database:
+# Ubuntu's knows .webp, Debian slim's does not, so the avatar test below got
+# 'utf-8' instead of 'image/webp' and the endpoint correctly rejected it with a
+# 400 - a failure that only reproduced inside the Docker image.
+#
+# Registering the type makes the test independent of the platform and matches
+# what a browser actually sends. Production is unaffected either way: a real
+# upload carries Content-Type: image/webp in the multipart part.
+mimetypes.add_type('image/webp', '.webp')
+
+
+class UploadMimeTypeTests(SimpleTestCase):
+    """Guards the platform dependency described above.
+
+    Without the registration this passes on a developer's Ubuntu machine and
+    fails inside the Docker image, which is the worst possible failure mode:
+    green locally, red in the environment that mirrors production.
+    """
+
+    def test_webp_resolves_to_image_webp(self):
+        self.assertEqual(mimetypes.guess_type('avatar.webp')[0], 'image/webp')
+
+    def test_other_image_types_still_resolve(self):
+        for filename, expected in (
+            ('avatar.png', 'image/png'),
+            ('avatar.jpg', 'image/jpeg'),
+            ('avatar.jpeg', 'image/jpeg'),
+        ):
+            with self.subTest(filename=filename):
+                self.assertEqual(mimetypes.guess_type(filename)[0], expected)
 
 
 class RegistrationTests(TestCase):
