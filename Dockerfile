@@ -55,6 +55,13 @@ ARG PROJ_NAME="home"
 # this script will execute at runtime when
 # the container starts and the database is available
 RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
+    printf "# Abort on the first failure. Without this the script runs migrate,\n" >> ./paracord_runner.sh && \
+    printf "# collectstatic and gunicorn in sequence regardless of exit status, so a\n" >> ./paracord_runner.sh && \
+    printf "# failed migration (a transient Neon blip, a revoked credential) is\n" >> ./paracord_runner.sh && \
+    printf "# swallowed and gunicorn serves traffic against an unmigrated database.\n" >> ./paracord_runner.sh && \
+    printf "# Deliberately not 'set -u': the optional superuser block below reads\n" >> ./paracord_runner.sh && \
+    printf "# DJANGO_SUPERUSER_USERNAME unguarded, and those are legitimately unset.\n" >> ./paracord_runner.sh && \
+    printf "set -e\n" >> ./paracord_runner.sh && \
     printf "RUN_PORT=\"\${PORT:-8080}\"\n\n" >> ./paracord_runner.sh && \
     printf "python manage.py migrate --no-input\n" >> ./paracord_runner.sh && \
     printf "python manage.py collectstatic --noinput\n" >> ./paracord_runner.sh && \

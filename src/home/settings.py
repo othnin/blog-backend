@@ -10,8 +10,10 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 import datetime
+import sys
 from pathlib import Path
 from decouple import config
+from django.core.exceptions import ImproperlyConfigured
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -155,24 +157,61 @@ WSGI_APPLICATION = "home.wsgi.application"
 
 import dj_database_url
 
-# Default to SQLite for local dev (no DATABASE_URL needed)
-DATABASES = {
-    "default": {
-        "ENGINE": "django.db.backends.sqlite3",
-        "NAME": BASE_DIR / "db.sqlite3",
-    }
-}
+# Production runs on Neon Postgres through Neon's PgBouncer pooler - that is
+# what DATABASE_URL points at (the "-pooler" host). The pooler is what makes the
+# app's connection count affordable: many client connections multiplex onto a
+# small number of real Postgres backends. Pointing DATABASE_URL at Neon's
+# *direct* host instead would expose the app to Neon's much lower
+# per-compute connection limit.
+#
+# SQLite is a local-development convenience only. It used to be the silent
+# fallback whenever DATABASE_URL was absent, which is actively dangerous in
+# production: `manage.py migrate` creates a fresh, empty database inside the
+# container, the app then boots and serves HTTP 200 with an empty blog, every
+# login fails, and each write is discarded on the next deploy. Each replica
+# would also get its own private database. A loud crash at startup is far
+# better than a passing healthcheck over an empty database.
+#
+# Captured independently of settings.DEBUG for the same reason as
+# FORCE_HTTPS_REDIRECT above: Django's test runner forces settings.DEBUG=False
+# during `manage.py test`, so a guard written as `if not DEBUG` would fire in
+# the test suite and take all 528 tests down with it.
+SQLITE_FALLBACK_ALLOWED = config(
+    "DJANGO_ALLOW_SQLITE", cast=bool, default=DEBUG or "test" in sys.argv
+)
 
-# Override with DATABASE_URL if set (Railway Dev or Railway Prod)
 DATABASE_URL = config("DATABASE_URL", cast=str, default="")
+
 if DATABASE_URL:
     DATABASES = {
         "default": dj_database_url.config(
             default=DATABASE_URL,
+            # Neon benefits from long-lived client connections: they stay warm
+            # on PgBouncer instead of being re-established per request. Paired
+            # with conn_health_checks, which validates a connection before
+            # reuse so a backend PgBouncer closed while idle is detected rather
+            # than surfacing as a dropped request.
             conn_max_age=300,
             conn_health_checks=True,
         )
     }
+elif SQLITE_FALLBACK_ALLOWED:
+    DATABASES = {
+        "default": {
+            "ENGINE": "django.db.backends.sqlite3",
+            "NAME": BASE_DIR / "db.sqlite3",
+        }
+    }
+else:
+    raise ImproperlyConfigured(
+        "DATABASE_URL is not set, and SQLite is not permitted here "
+        "(DJANGO_ALLOW_SQLITE is off and DEBUG is off). Refusing to start: "
+        "falling back to SQLite would create an empty, container-local "
+        "database that silently loses every write on redeploy and diverges "
+        "between replicas. Set DATABASE_URL to your Neon connection string "
+        "('postgresql://...@...-pooler.<region>.neon.tech/<db>?sslmode=require'), "
+        "or set DJANGO_ALLOW_SQLITE=1 if you really do intend SQLite."
+    )
 
 # Password validation
 # https://docs.djangoproject.com/en/5.0/ref/settings/#auth-password-validators

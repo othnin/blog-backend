@@ -48,7 +48,19 @@ class LoggingResilienceTests(SimpleTestCase):
             print('OK')
             """
         )
-        env = {**os.environ, 'DJANGO_DEBUG': 'False'}
+        # Settings now refuse to fall back to SQLite when DEBUG is off, and this
+        # subprocess deliberately runs with DEBUG=False because that is the
+        # production path under test. The subprocess never opens a database
+        # connection, so a dummy Neon URL satisfies the guard while preserving
+        # the DEBUG=False condition the test actually cares about.
+        env = {
+            **os.environ,
+            'DJANGO_DEBUG': 'False',
+            'DATABASE_URL': (
+                'postgresql://user:pass@ep-example-pooler.'
+                'us-east-2.aws.neon.tech/neondb?sslmode=require'
+            ),
+        }
         proc = subprocess.run(
             [sys.executable, '-c', script],
             cwd=str(SRC_DIR),
@@ -242,3 +254,183 @@ class GunicornDeploymentConfigTests(SimpleTestCase):
             self.dockerfile_text,
             'sync workers serialise the whole site behind 2 connections',
         )
+
+    def test_entrypoint_aborts_on_the_first_failure(self):
+        # paracord_runner.sh runs migrate, then collectstatic, then gunicorn.
+        # Without `set -e` a failed migration does not stop the script: it logs
+        # "Django setup complete" and starts serving traffic against a database
+        # that was never migrated. That is exactly what happens when Neon drops
+        # the connection mid-deploy, and it is invisible from the outside.
+        self.assertRegex(
+            self.dockerfile_text,
+            r'printf "set -e',
+            'the generated entrypoint must abort on the first failing command',
+        )
+        self.assertNotIn(
+            'set -euo',
+            self.dockerfile_text,
+            'set -u would break the optional superuser block, which reads '
+            'DJANGO_SUPERUSER_USERNAME without a default',
+        )
+
+
+class DatabaseFallbackTests(SimpleTestCase):
+    """
+    Guards against the silent SQLite fallback reaching production.
+
+    Settings used to fall back to SQLite whenever DATABASE_URL was unset. In
+    production that does not raise: `manage.py migrate` builds a fresh, empty
+    database inside the container, gunicorn boots, the healthcheck passes, and
+    the site serves an empty blog whose logins all fail and whose writes vanish
+    on the next deploy. Every replica would hold its own private database.
+
+    Production uses Neon Postgres behind PgBouncer, so the only correct outcome
+    with no DATABASE_URL is a loud failure at import time.
+    """
+
+    def _run_settings(self, script, **env_overrides):
+        env = {
+            **os.environ,
+            'DJANGO_DEBUG': 'False',
+            'DATABASE_URL': '',
+            'DJANGO_SETTINGS_MODULE': 'home.settings',
+        }
+        # Removed rather than set to '0': production has no DJANGO_ALLOW_SQLITE
+        # variable at all, so leaving it defined here would let the env override
+        # do the guard's job and make these tests pass for the wrong reason.
+        env.pop('DJANGO_ALLOW_SQLITE', None)
+        env.update(env_overrides)
+        return subprocess.run(
+            [sys.executable, '-c', textwrap.dedent(script)],
+            cwd=str(SRC_DIR),
+            capture_output=True,
+            text=True,
+            env=env,
+            timeout=120,
+        )
+
+    def test_production_without_database_url_refuses_to_start(self):
+        proc = self._run_settings(
+            """
+            import django
+            django.setup()
+            print('SHOULD NOT REACH HERE')
+            """
+        )
+        combined = proc.stdout + proc.stderr
+        self.assertNotIn(
+            'SHOULD NOT REACH HERE',
+            combined,
+            'settings imported successfully with no DATABASE_URL in production',
+        )
+        self.assertIn(
+            'ImproperlyConfigured',
+            combined,
+            f'expected an ImproperlyConfigured error, got:\n{combined}',
+        )
+        self.assertIn(
+            'DATABASE_URL',
+            combined,
+            f'the error should name the missing variable, got:\n{combined}',
+        )
+
+    def test_error_message_names_the_neon_pooler_host(self):
+        # The message tells an operator what to actually paste, including the
+        # "-pooler" host. Getting this wrong sends them to the direct host, which
+        # Neon limits far more aggressively.
+        proc = self._run_settings(
+            """
+            import django
+            django.setup()
+            """
+        )
+        self.assertIn('-pooler', proc.stdout + proc.stderr)
+
+    def test_sqlite_still_works_for_local_development(self):
+        proc = self._run_settings(
+            """
+            import django
+            django.setup()
+            from django.conf import settings
+            assert settings.DATABASES['default']['ENGINE'] == \\
+                'django.db.backends.sqlite3', settings.DATABASES
+            print('OK')
+            """,
+            DJANGO_ALLOW_SQLITE='1',
+        )
+        self.assertIn('OK', proc.stdout, proc.stdout + proc.stderr)
+
+    def test_debug_mode_needs_no_database_url_or_escape_hatch(self):
+        """The everyday local-dev path must keep working with zero env setup."""
+        proc = self._run_settings(
+            """
+            import django
+            django.setup()
+            from django.conf import settings
+            assert settings.DATABASES['default']['ENGINE'] == \\
+                'django.db.backends.sqlite3', settings.DATABASES
+            print('OK')
+            """,
+            DJANGO_DEBUG='True',
+        )
+        self.assertIn('OK', proc.stdout, proc.stdout + proc.stderr)
+
+    def test_database_url_wins_over_sqlite_permission(self):
+        # Setting DATABASE_URL must always select Postgres, even when the
+        # SQLite escape hatch is also enabled.
+        proc = self._run_settings(
+            """
+            import django
+            django.setup()
+            from django.conf import settings
+            engine = settings.DATABASES['default']['ENGINE']
+            assert engine == 'django.db.backends.postgresql', engine
+            print('OK')
+            """,
+            DJANGO_ALLOW_SQLITE='1',
+            DATABASE_URL=(
+                'postgresql://user:pass@ep-example-pooler.'
+                'us-east-2.aws.neon.tech/neondb?sslmode=require'
+            ),
+        )
+        self.assertIn('OK', proc.stdout, proc.stdout + proc.stderr)
+
+    def test_neon_tls_options_are_preserved(self):
+        # sslmode/channel_binding must reach psycopg via OPTIONS, otherwise the
+        # Neon connection is not encrypted.
+        proc = self._run_settings(
+            """
+            import django
+            django.setup()
+            from django.conf import settings
+            options = settings.DATABASES['default'].get('OPTIONS') or {}
+            assert options.get('sslmode') == 'require', options
+            print('OK')
+            """,
+            DATABASE_URL=(
+                'postgresql://user:pass@ep-example-pooler.'
+                'us-east-2.aws.neon.tech/neondb?sslmode=require'
+                '&channel_binding=require'
+            ),
+        )
+        self.assertIn('OK', proc.stdout, proc.stdout + proc.stderr)
+
+    def test_neon_connections_are_kept_warm(self):
+        # conn_max_age keeps client connections warm on PgBouncer; without it
+        # every request pays a fresh TLS handshake to Neon.
+        proc = self._run_settings(
+            """
+            import django
+            django.setup()
+            from django.conf import settings
+            db = settings.DATABASES['default']
+            assert db['CONN_MAX_AGE'] == 300, db.get('CONN_MAX_AGE')
+            assert db['CONN_HEALTH_CHECKS'] is True, db.get('CONN_HEALTH_CHECKS')
+            print('OK')
+            """,
+            DATABASE_URL=(
+                'postgresql://user:pass@ep-example-pooler.'
+                'us-east-2.aws.neon.tech/neondb?sslmode=require'
+            ),
+        )
+        self.assertIn('OK', proc.stdout, proc.stdout + proc.stderr)
