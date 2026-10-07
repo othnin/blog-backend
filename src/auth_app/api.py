@@ -290,7 +290,9 @@ def google_login(request, payload: GoogleLoginSchema):
     email = idinfo['email']
 
     try:
-        user = User.objects.get(email=email)
+        user = User.objects.filter(email=email).first()
+        if user is None:
+            raise HttpError(400, 'Invalid credentials')
     except User.DoesNotExist:
         user = User.objects.create_user(
             username=_generate_unique_username(email),
@@ -399,7 +401,9 @@ def password_reset_request(request, data: PasswordResetRequestSerializer):
     check_rate_limit(request, key="password_reset_request", max_requests=5, period=3600)
     try:
         try:
-            user = User.objects.get(email=data.email)
+            user = User.objects.filter(email=data.email).first()
+            if user is None:
+                raise User.DoesNotExist()
             
             # Create password reset token
             token = create_password_reset_token(user)
@@ -495,7 +499,9 @@ def resend_verification_email(request, data: ResendVerificationSchema):
     check_rate_limit(request, key="resend_verification", max_requests=3, period=3600)
 
     try:
-        user = User.objects.select_related('profile').get(email=data.email)
+        user = User.objects.select_related('profile').filter(email=data.email).first()
+        if user is None:
+            raise HttpError(404, 'User not found')
         if not user.profile.email_verified:
             # Invalidate any existing unused tokens
             EmailVerificationToken.objects.filter(user=user, is_used=False).update(is_used=True)
