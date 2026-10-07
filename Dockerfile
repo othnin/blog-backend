@@ -72,16 +72,15 @@ RUN printf "#!/bin/bash\n" > ./paracord_runner.sh && \
     printf "# collectstatic and gunicorn in sequence regardless of exit status, so a\n" >> ./paracord_runner.sh && \
     printf "# failed migration (a transient Neon blip, a revoked credential) is\n" >> ./paracord_runner.sh && \
     printf "# swallowed and gunicorn serves traffic against an unmigrated database.\n" >> ./paracord_runner.sh && \
-    printf "# Deliberately not 'set -u': the optional superuser block below reads\n" >> ./paracord_runner.sh && \
-    printf "# DJANGO_SUPERUSER_USERNAME unguarded, and those are legitimately unset.\n" >> ./paracord_runner.sh && \
+    printf "# ensure_superuser reads DJANGO_SUPERUSER_* from os.environ itself, so no\n" >> ./paracord_runner.sh && \
+    printf "# shell variable is dereferenced here (which is why 'set -u' would be safe).\n" >> ./paracord_runner.sh && \
+    printf "# It creates the bootstrap admin only when the account is missing and never\n" >> ./paracord_runner.sh && \
+    printf "# touches an existing one — no password is stored in the environment.\n" >> ./paracord_runner.sh && \
     printf "set -e\n" >> ./paracord_runner.sh && \
     printf "RUN_PORT=\"\${PORT:-8080}\"\n\n" >> ./paracord_runner.sh && \
     printf "python manage.py migrate --no-input\n" >> ./paracord_runner.sh && \
     printf "python manage.py collectstatic --noinput\n" >> ./paracord_runner.sh && \
-    printf "if [ -n \"\$DJANGO_SUPERUSER_USERNAME\" ]; then\n" >> ./paracord_runner.sh && \
-    printf "  python manage.py createsuperuser --noinput 2>/dev/null || true\n" >> ./paracord_runner.sh && \
-    printf "  python manage.py shell -c \"from django.contrib.auth.models import User; u = User.objects.get(username='\$DJANGO_SUPERUSER_USERNAME'); u.set_password('\$DJANGO_SUPERUSER_PASSWORD'); u.save(); u.profile.role='admin'; u.profile.email_verified=True; u.profile.save()\" 2>/dev/null || true\n" >> ./paracord_runner.sh && \
-    printf "fi\n" >> ./paracord_runner.sh && \
+    printf "python manage.py ensure_superuser\n" >> ./paracord_runner.sh && \
     printf "echo \"Django setup complete. Starting gunicorn on port \$RUN_PORT...\"\n" >> ./paracord_runner.sh && \
     printf "GUNICORN_WORKERS=\"\${WEB_CONCURRENCY:-2}\"\n" >> ./paracord_runner.sh && \
     printf "GUNICORN_WORKER_CLASS=\"\${GUNICORN_WORKER_CLASS:-gthread}\"\n" >> ./paracord_runner.sh && \

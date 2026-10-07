@@ -11,7 +11,11 @@ from django.utils import timezone
 from django.conf import settings
 from datetime import timedelta
 import json
+import os
+from io import StringIO
 from unittest.mock import patch, MagicMock
+
+from django.core.management import call_command
 
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
 from auth_app.utils import (
@@ -2704,3 +2708,124 @@ class ErrorDisclosureTests(TestCase):
         body = json.loads(r.content)
         self.assertEqual(body['status'], 'error')
         self._assert_clean(r)
+
+
+class EnsureSuperuserCommandTests(TestCase):
+    """Bootstrap admin creation: create-if-missing, never reset.
+
+    The command replaces an entrypoint block that called set_password() on
+    every container boot, so the tests below are mostly about what the
+    command refuses to do to an account that already exists.
+    """
+
+    def _run(self, env):
+        out = StringIO()
+        with patch.dict(os.environ, env):
+            call_command("ensure_superuser", stdout=out)
+        return out.getvalue()
+
+    def test_skipped_when_username_env_is_unset(self):
+        with patch.dict(os.environ):
+            os.environ.pop("DJANGO_SUPERUSER_USERNAME", None)
+            out = StringIO()
+            call_command("ensure_superuser", stdout=out)
+
+        self.assertIn("skipping", out.getvalue())
+        self.assertFalse(User.objects.filter(username="bootstrap_admin").exists())
+
+    def test_skipped_when_username_env_is_empty(self):
+        out = self._run({"DJANGO_SUPERUSER_USERNAME": "   "})
+
+        self.assertIn("skipping", out)
+        self.assertEqual(User.objects.count(), 0)
+
+    def test_creates_superuser_with_unusable_password(self):
+        out = self._run({
+            "DJANGO_SUPERUSER_USERNAME": "bootstrap_admin",
+            "DJANGO_SUPERUSER_EMAIL": "admin@example.com",
+        })
+
+        user = User.objects.get(username="bootstrap_admin")
+        self.assertTrue(user.is_superuser)
+        self.assertTrue(user.is_staff)
+        self.assertEqual(user.email, "admin@example.com")
+        # No secret in the environment means no secret at all: the account
+        # must not be usable for password login until the admin resets it.
+        self.assertFalse(user.has_usable_password())
+        self.assertEqual(user.profile.role, "admin")
+        self.assertTrue(user.profile.email_verified)
+        self.assertIn("unusable password", out)
+
+    def test_existing_user_is_left_completely_untouched(self):
+        user = User.objects.create_user(
+            username="bootstrap_admin",
+            email="admin@example.com",
+            password="OriginalPass123!",
+        )
+        user.is_superuser = False
+        user.is_staff = False
+        user.save()
+        profile = user.profile
+        profile.role = "reader"
+        profile.email_verified = False
+        profile.save()
+
+        self._run({
+            "DJANGO_SUPERUSER_USERNAME": "bootstrap_admin",
+            "DJANGO_SUPERUSER_EMAIL": "admin@example.com",
+        })
+
+        user.refresh_from_db()
+        # The old entrypoint reset this password on every boot; this one must not.
+        self.assertTrue(user.check_password("OriginalPass123!"))
+        self.assertFalse(user.is_superuser)
+        self.assertFalse(user.is_staff)
+        self.assertEqual(user.profile.role, "reader")
+        self.assertFalse(user.profile.email_verified)
+
+    def test_existing_user_without_email_does_not_gain_one(self):
+        User.objects.create_user(username="bootstrap_admin", password="pw")
+
+        self._run({
+            "DJANGO_SUPERUSER_USERNAME": "bootstrap_admin",
+            "DJANGO_SUPERUSER_EMAIL": "new@example.com",
+        })
+
+        self.assertEqual(
+            User.objects.get(username="bootstrap_admin").email, ""
+        )
+
+    def test_second_run_is_a_no_op(self):
+        env = {
+            "DJANGO_SUPERUSER_USERNAME": "bootstrap_admin",
+            "DJANGO_SUPERUSER_EMAIL": "admin@example.com",
+        }
+        self._run(env)
+        first_password = User.objects.get(
+            username="bootstrap_admin"
+        ).password
+
+        out = self._run(env)
+
+        self.assertIn("already exists", out)
+        self.assertEqual(User.objects.count(), 1)
+        self.assertEqual(
+            User.objects.get(username="bootstrap_admin").password,
+            first_password,
+        )
+
+    def test_invalid_email_creates_account_without_one(self):
+        out = self._run({
+            "DJANGO_SUPERUSER_USERNAME": "bootstrap_admin",
+            "DJANGO_SUPERUSER_EMAIL": "not-an-email",
+        })
+
+        user = User.objects.get(username="bootstrap_admin")
+        self.assertEqual(user.email, "")
+        self.assertIn("not a valid address", out)
+        self.assertIn("no email address", out)
+
+    def test_warns_when_created_without_an_email(self):
+        out = self._run({"DJANGO_SUPERUSER_USERNAME": "bootstrap_admin"})
+
+        self.assertIn("forgot-password", out)
