@@ -32,7 +32,7 @@ class GlobalRateLimitMiddleware:
     def __call__(self, request):
         # Only rate-limit /api/* paths (other paths like /admin go unchecked)
         # Exempt health checks and other non-user paths
-        if request.path.startswith("/api/") and request.path != "/api/health/":
+        if request.path.startswith("/api/") and request.path not in ("/api/health", "/api/health/"):
             try:
                 check_rate_limit(request, key="global", max_requests=100, period=60)
             except HttpError as e:
@@ -114,7 +114,7 @@ class SSLRedirectMiddleware:
 
     def __call__(self, request):
         # Exempt paths that should allow plain HTTP
-        exempt_paths = ['/api/health/']
+        exempt_paths = ['/api/health', '/api/health/']
         host = request.get_host().split(':')[0]
         # Exempt localhost/127.0.0.1 (for local development and CI)
         is_localhost = host in ('localhost', '127.0.0.1')

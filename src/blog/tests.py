@@ -2817,6 +2817,17 @@ class HealthCheckTests(TestCase):
         self.assertIn('database', data['checks'])
         self.assertIn('cache', data['checks'])
 
+    def test_health_check_no_trailing_slash(self):
+        """No-slash form returns 200 directly, with no APPEND_SLASH redirect.
+
+        Railway's healthcheck and the Next.js /api/:path* proxy both request
+        this form. A 301 here would be stripped back to no-slash by the proxy,
+        looping forever.
+        """
+        response = Client().get('/api/health')
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content)['status'], 'ok')
+
 
 # ---------------------------------------------------------------------------
 # Security Event Logging Tests

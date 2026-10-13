@@ -24,6 +24,11 @@ from .views import health_check
 
 urlpatterns = [
     path("django-admin/", blog_admin_site.urls),
+    # Register both spellings. Railway's healthcheck and the frontend proxy both
+    # request the no-slash form, and Django's APPEND_SLASH would otherwise 301 to
+    # the slash form - which the Next.js /api/:path* rewrite strips again,
+    # producing an infinite redirect loop. An explicit match means no redirect.
+    path("api/health", health_check),
     path("api/health/", health_check),
     path("api/", api.urls)
 ]
