@@ -55,6 +55,20 @@ CSRF_ALLOWED_ORIGINS_STR = config(
     default="http://*.railway.app,https://*.railway.app",
 )
 CSRF_TRUSTED_ORIGINS = _split_csv(CSRF_ALLOWED_ORIGINS_STR)
+if DEBUG:
+    # Local dev reaches Django both directly (:8001) and through the Next.js
+    # proxy (:3000, for /django-admin/* and /api/*). Same-origin POSTs work
+    # without this, but proxied ones present Origin: http://localhost:3000,
+    # which Django rejects unless it is explicitly trusted. Mirrors the
+    # ALLOWED_HOSTS DEBUG override above.
+    for _local_origin in (
+        "http://localhost:3000",
+        "http://127.0.0.1:3000",
+        "http://localhost:8001",
+        "http://127.0.0.1:8001",
+    ):
+        if _local_origin not in CSRF_TRUSTED_ORIGINS:
+            CSRF_TRUSTED_ORIGINS.append(_local_origin)
 
 # Application definition
 
@@ -75,6 +89,7 @@ INSTALLED_APPS = [
     "auth_app",
     "blog",
     "recipes",
+    "locations",
 ]
 
 MIDDLEWARE = [
@@ -316,6 +331,9 @@ SKIP_EMAIL_VERIFICATION = config("SKIP_EMAIL_VERIFICATION", cast=bool, default=c
 
 # Google OAuth
 GOOGLE_CLIENT_ID = config("GOOGLE_CLIENT_ID", cast=str, default="")
+
+# Google Maps Geocoding API (backend only; browser map key is NEXT_PUBLIC_* on the frontend)
+GOOGLE_MAPS_API_KEY = config("GOOGLE_MAPS_API_KEY", cast=str, default="")
 
 # Cache — LocMemCache for development; set CACHE_URL=redis://... for production
 CACHE_URL = config("CACHE_URL", cast=str, default="")

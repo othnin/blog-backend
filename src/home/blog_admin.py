@@ -3,6 +3,7 @@ Custom Django AdminSite for organized admin interface.
 Groups models by function rather than by app name.
 """
 from django.contrib.admin import AdminSite
+from django.contrib.auth.admin import UserAdmin
 from django.contrib.auth.models import User, Group
 
 class BlogAdminSite(AdminSite):
@@ -21,5 +22,5 @@ class BlogAdminSite(AdminSite):
 blog_admin_site = BlogAdminSite(name='blog_admin')
 
 # Register Django's built-in models
-blog_admin_site.register(User)
+blog_admin_site.register(User, UserAdmin)
 blog_admin_site.register(Group)

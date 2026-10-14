@@ -225,6 +225,13 @@ class Comment(models.Model):
         on_delete=models.CASCADE,
         related_name='comments',
     )
+    location = models.ForeignKey(
+        'locations.Location',
+        null=True,
+        blank=True,
+        on_delete=models.CASCADE,
+        related_name='comments',
+    )
     author = models.ForeignKey(
         User,
         null=True,
@@ -254,12 +261,15 @@ class Comment(models.Model):
         indexes = [
             models.Index(fields=['post', 'parent', 'created_at']),
             models.Index(fields=['recipe', 'parent', 'created_at']),
+            models.Index(fields=['location', 'parent', 'created_at']),
         ]
 
     def __str__(self):
         if self.post_id:
             return f'Comment {self.id} by {self.author_id} on post {self.post_id}'
-        return f'Comment {self.id} by {self.author_id} on recipe {self.recipe_id}'
+        if self.recipe_id:
+            return f'Comment {self.id} by {self.author_id} on recipe {self.recipe_id}'
+        return f'Comment {self.id} by {self.author_id} on location {self.location_id}'
 
 
 class SecurityEvent(models.Model):

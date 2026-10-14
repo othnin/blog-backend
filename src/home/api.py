@@ -16,6 +16,12 @@ from auth_app.api import router as auth_router
 from blog.api import BlogController, CommentController
 from blog.admin_api import AdminController
 from recipes.api import RecipeController, RecipeDetailController
+from locations.api import (
+    LocationController,
+    LocationDetailController,
+    RestaurantController,
+    RestaurantDetailController,
+)
 from auth_app.serializers import LoginSerializer
 from django.http import JsonResponse
 from django.contrib.auth import authenticate
@@ -217,6 +223,10 @@ api.register_controllers(CommentController)
 api.register_controllers(AdminController)
 api.register_controllers(RecipeController)   # static-prefix paths first
 api.register_controllers(RecipeDetailController)  # single-segment dynamic paths second
+api.register_controllers(LocationController)       # static + multi-segment paths first
+api.register_controllers(LocationDetailController)  # single-segment /{id}/ paths second
+api.register_controllers(RestaurantController)      # static + no-segment paths first
+api.register_controllers(RestaurantDetailController)  # single-segment /{id}/ paths second
 
 
 class UserSchema(Schema):
