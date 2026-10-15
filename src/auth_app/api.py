@@ -6,11 +6,13 @@ from django.contrib.auth.models import User
 from django.core.exceptions import ValidationError
 from django.db import IntegrityError, OperationalError, transaction
 from ninja import Router, Schema, File
+from ninja.errors import HttpError
 from ninja.files import UploadedFile
 # SuspendAwareJWTAuth rejects suspended users on every request (see helpers/api_auth.py).
 from helpers.api_auth import SuspendAwareJWTAuth as JWTAuth
 from pydantic import ValidationError as PydanticValidationError
-from typing import Optional
+from typing import List, Optional
+from datetime import datetime
 import helpers
 import io
 import logging
@@ -77,6 +79,18 @@ class AuthResponseSchema(Schema):
 class GoogleLoginSchema(Schema):
     """Request schema for Google OAuth login."""
     credential: str
+
+
+class ActivityItemSchema(Schema):
+    """A single item in a user's recent activity feed."""
+    type: str  # 'comment' | 'rating'
+    target_type: str  # 'post' | 'recipe' | 'location'
+    target_id: int
+    title: str
+    slug: Optional[str] = None
+    excerpt: Optional[str] = None
+    score: Optional[int] = None
+    created_at: datetime
 
 
 class TokenResponseSchema(Schema):
@@ -289,11 +303,8 @@ def google_login(request, payload: GoogleLoginSchema):
 
     email = idinfo['email']
 
-    try:
-        user = User.objects.filter(email=email).first()
-        if user is None:
-            raise HttpError(400, 'Invalid credentials')
-    except User.DoesNotExist:
+    user = User.objects.filter(email=email).first()
+    if user is None:
         user = User.objects.create_user(
             username=_generate_unique_username(email),
             email=email,
@@ -557,6 +568,75 @@ def get_current_user(request):
             'profile_public': bool(profile.profile_public) if profile else True,
         }
     }
+
+
+@router.get("/activity", auth=JWTAuth(), response=List[ActivityItemSchema])
+def get_my_activity(request, limit: int = 20):
+    """
+    Get the current user's recent activity (comments and recipe ratings).
+
+    Requires JWT authentication. Returns a merged, newest-first list so the
+    reader home page has something to show even when they cannot create content.
+
+    Response:
+    - List of ActivityItemSchema, newest first
+    """
+    from blog.models import Comment
+    from recipes.models import RecipeRating
+    from helpers.lexical import lexical_to_text
+
+    user = request.user
+    limit = max(1, min(limit, 100))
+    items = []
+
+    comments = (
+        Comment.objects
+        .filter(author=user, is_deleted=False)
+        .select_related('post', 'recipe', 'location')
+        .order_by('-created_at')[:limit]
+    )
+    for c in comments:
+        if c.post_id:
+            items.append({
+                'type': 'comment', 'target_type': 'post', 'target_id': c.post_id,
+                'title': c.post.title if c.post else 'Deleted post',
+                'slug': c.post.slug if c.post else None,
+                'excerpt': lexical_to_text(c.content_json)[:200] or None,
+                'score': None, 'created_at': c.created_at,
+            })
+        elif c.recipe_id:
+            items.append({
+                'type': 'comment', 'target_type': 'recipe', 'target_id': c.recipe_id,
+                'title': c.recipe.title if c.recipe else 'Deleted recipe',
+                'slug': c.recipe.slug if c.recipe else None,
+                'excerpt': lexical_to_text(c.content_json)[:200] or None,
+                'score': None, 'created_at': c.created_at,
+            })
+        elif c.location_id:
+            items.append({
+                'type': 'comment', 'target_type': 'location', 'target_id': c.location_id,
+                'title': c.location.name if c.location else 'Deleted location',
+                'slug': None,
+                'excerpt': lexical_to_text(c.content_json)[:200] or None,
+                'score': None, 'created_at': c.created_at,
+            })
+
+    ratings = (
+        RecipeRating.objects
+        .filter(user=user)
+        .select_related('recipe')
+        .order_by('-created_at')[:limit]
+    )
+    for r in ratings:
+        items.append({
+            'type': 'rating', 'target_type': 'recipe', 'target_id': r.recipe_id,
+            'title': r.recipe.title if r.recipe else 'Deleted recipe',
+            'slug': r.recipe.slug if r.recipe else None,
+            'excerpt': None, 'score': r.score, 'created_at': r.created_at,
+        })
+
+    items.sort(key=lambda i: i['created_at'], reverse=True)
+    return items[:limit]
 
 
 @router.get("/settings", auth=JWTAuth())

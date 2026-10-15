@@ -189,6 +189,8 @@ class RecipeRating(models.Model):
     recipe = models.ForeignKey(Recipe, on_delete=models.CASCADE, related_name='ratings')
     user = models.ForeignKey(User, on_delete=models.CASCADE, related_name='recipe_ratings')
     score = models.PositiveSmallIntegerField()  # 1–5, validated in serializer
+    created_at = models.DateTimeField(auto_now_add=True, db_index=True)
+    updated_at = models.DateTimeField(auto_now=True)
 
     class Meta:
         unique_together = [('recipe', 'user')]

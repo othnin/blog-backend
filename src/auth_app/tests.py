@@ -2829,3 +2829,133 @@ class EnsureSuperuserCommandTests(TestCase):
         out = self._run({"DJANGO_SUPERUSER_USERNAME": "bootstrap_admin"})
 
         self.assertIn("forgot-password", out)
+
+
+LEXICAL_JSON = json.dumps({
+    "root": {
+        "children": [{
+            "children": [{"detail": 0, "format": 0, "mode": "normal", "style": "",
+                          "text": "Great read", "type": "text", "version": 1}],
+            "direction": "ltr", "format": "", "indent": 0, "type": "paragraph", "version": 1,
+        }],
+        "direction": "ltr", "format": "", "indent": 0, "type": "root", "version": 1,
+    }
+})
+
+
+class ActivityFeedTests(TestCase):
+    """Tests for GET /api/auth/activity — merged comment + rating feed."""
+
+    def setUp(self):
+        from blog.models import BlogPost, Comment
+        from recipes.models import Recipe, RecipeRating
+
+        self.BlogPost = BlogPost
+        self.Comment = Comment
+        self.Recipe = Recipe
+        self.RecipeRating = RecipeRating
+
+        self.activity_url = '/api/auth/activity'
+        self.token_url = '/api/token/pair'
+
+        self.user = User.objects.create_user(
+            username='reader1', email='reader1@example.com', password='ValidPass123'
+        )
+        self.user.profile.role = 'reader'
+        self.user.profile.email_verified = True
+        self.user.profile.save()
+
+        self.post = BlogPost.objects.create(
+            title='Hello World', slug='hello-world', author=self.user,
+            content_json=LEXICAL_JSON, status='published',
+        )
+        self.recipe = Recipe.objects.create(
+            title='Pancakes', slug='pancakes', author=self.user, status='published',
+        )
+
+    def _token(self, username='reader1'):
+        response = self.client.post(
+            self.token_url,
+            data=json.dumps({'username': username, 'password': 'ValidPass123'}),
+            content_type='application/json',
+        )
+        return json.loads(response.content)['access']
+
+    def _get(self, token=None):
+        token = token or self._token()
+        return self.client.get(self.activity_url, HTTP_AUTHORIZATION=f'Bearer {token}')
+
+    def test_unauthenticated_returns_401(self):
+        self.assertEqual(self.client.get(self.activity_url).status_code, 401)
+
+    def test_empty_feed_returns_200_and_empty_list(self):
+        response = self._get()
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(json.loads(response.content), [])
+
+    def test_includes_own_post_comment(self):
+        self.Comment.objects.create(
+            post=self.post, author=self.user, content_json=LEXICAL_JSON
+        )
+        body = json.loads(self._get().content)
+        self.assertEqual(len(body), 1)
+        self.assertEqual(body[0]['type'], 'comment')
+        self.assertEqual(body[0]['target_type'], 'post')
+        self.assertEqual(body[0]['title'], 'Hello World')
+        self.assertEqual(body[0]['slug'], 'hello-world')
+        self.assertIn('Great read', body[0]['excerpt'])
+
+    def test_includes_recipe_comment(self):
+        self.Comment.objects.create(
+            recipe=self.recipe, author=self.user, content_json=LEXICAL_JSON
+        )
+        body = json.loads(self._get().content)
+        self.assertEqual(body[0]['target_type'], 'recipe')
+        self.assertEqual(body[0]['slug'], 'pancakes')
+
+    def test_includes_recipe_rating(self):
+        self.RecipeRating.objects.create(recipe=self.recipe, user=self.user, score=5)
+        body = json.loads(self._get().content)
+        self.assertEqual(body[0]['type'], 'rating')
+        self.assertEqual(body[0]['score'], 5)
+        self.assertEqual(body[0]['target_type'], 'recipe')
+
+    def test_excludes_other_users_activity(self):
+        other = User.objects.create_user(
+            username='other', email='other@example.com', password='ValidPass123'
+        )
+        self.Comment.objects.create(
+            post=self.post, author=other, content_json=LEXICAL_JSON
+        )
+        self.RecipeRating.objects.create(recipe=self.recipe, user=other, score=3)
+        self.assertEqual(json.loads(self._get().content), [])
+
+    def test_excludes_soft_deleted_comments(self):
+        self.Comment.objects.create(
+            post=self.post, author=self.user, content_json=LEXICAL_JSON, is_deleted=True
+        )
+        self.assertEqual(json.loads(self._get().content), [])
+
+    def test_sorted_newest_first(self):
+        c = self.Comment.objects.create(
+            post=self.post, author=self.user, content_json=LEXICAL_JSON
+        )
+        r = self.RecipeRating.objects.create(recipe=self.recipe, user=self.user, score=4)
+        body = json.loads(self._get().content)
+        self.assertEqual(len(body), 2)
+        # rating created after comment -> appears first
+        self.assertEqual(body[0]['type'], 'rating')
+        self.assertEqual(body[1]['type'], 'comment')
+
+    def test_limit_parameter_caps_results(self):
+        for i in range(5):
+            self.Comment.objects.create(
+                post=self.post, author=self.user, content_json=LEXICAL_JSON
+            )
+        body = json.loads(
+            self.client.get(
+                f'{self.activity_url}?limit=2',
+                HTTP_AUTHORIZATION=f'Bearer {self._token()}',
+            ).content
+        )
+        self.assertEqual(len(body), 2)
