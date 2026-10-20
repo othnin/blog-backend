@@ -10,14 +10,42 @@ from helpers.storage import get_presigned_url_or_none
 
 
 class CategoryOut(BaseModel):
-    """Category output serializer."""
+    """Category output serializer.
+
+    image_url is a public redirect path (/api/blog/categories/{slug}/image/),
+    never the raw storage key or a signed URL — see BlogController.category_image.
+    """
     id: int
     name: str
     slug: str
+    image_url: str = ''
     created_at: datetime
 
     class Config:
         from_attributes = True
+
+    @model_validator(mode='before')
+    @classmethod
+    def resolve_image_url(cls, data):
+        """Turn a stored key (category_images/x.png) into a public redirect path.
+
+        Runs for both ORM objects (from_attributes on nested post categories)
+        and plain dicts, so every CategoryOut consumer gets a usable URL.
+        """
+        if isinstance(data, dict):
+            raw = data.get('image_url') or ''
+            slug = data.get('slug', '')
+            if raw and not str(raw).startswith(('http://', 'https://', '/')):
+                data['image_url'] = f'/api/blog/categories/{slug}/image/'
+            return data
+        raw = getattr(data, 'image_url', '') or ''
+        return {
+            'id': data.id,
+            'name': data.name,
+            'slug': data.slug,
+            'image_url': f'/api/blog/categories/{data.slug}/image/' if raw else '',
+            'created_at': data.created_at,
+        }
 
 
 class UserBasicOut(BaseModel):

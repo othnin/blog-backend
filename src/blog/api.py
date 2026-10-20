@@ -16,7 +16,8 @@ from django.core.files.storage import default_storage
 from typing import List, Optional
 from .models import BlogPost, Category, Comment, Tag
 from helpers.rate_limit import check_rate_limit
-from helpers.storage import get_presigned_url, is_safe_storage_key
+from helpers.storage import get_presigned_url, get_presigned_url_or_none, is_safe_storage_key
+from django.http import HttpResponseRedirect
 from ninja import File
 from ninja.files import UploadedFile
 import logging
@@ -86,6 +87,32 @@ class BlogController:
         slug = slugify(name)
         category, _ = Category.objects.get_or_create(slug=slug, defaults={'name': name})
         return category
+
+    @http_get(
+        "/categories/{slug}/image/",
+        description="Redirect to a category's image (signed URL for private storage)"
+    )
+    def category_image(self, slug: str, request):
+        """
+        302-redirect to the category image.
+
+        Storage is a private bucket, so the target is a short-lived signed URL.
+        The redirect itself is not cacheable (Cache-Control: no-store) — caching
+        it would pin an expired signed URL and break the image.
+        """
+        category = get_object_or_404(Category, slug=slug)
+        if not category.image_url:
+            raise HttpError(404, "Category has no image")
+        url = get_presigned_url_or_none(category.image_url)
+        if not url:
+            raise HttpError(404, "Category image is unavailable")
+        if not url.startswith(('http://', 'https://')):
+            # Local dev: MEDIA_URL-relative path — make it absolute so the
+            # browser can follow it (the Next.js proxy only forwards /api/*).
+            url = request.build_absolute_uri(url)
+        response = HttpResponseRedirect(url)
+        response['Cache-Control'] = 'no-store'
+        return response
 
     # ============= Tag Endpoints =============
 

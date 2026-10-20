@@ -150,6 +150,28 @@ class CategoryTests(TestCase):
         )
         self.assertEqual(response.status_code, 401)
 
+    def test_list_includes_image_url_empty_by_default(self):
+        response = self.client.get('/api/blog/categories/')
+        data = json.loads(response.content)
+        for cat in data:
+            self.assertEqual(cat['image_url'], '')
+
+    def test_list_image_url_is_redirect_path_when_uploaded(self):
+        cat = Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        response = self.client.get('/api/blog/categories/')
+        data = json.loads(response.content)
+        entry = next(c for c in data if c['slug'] == 'cooking')
+        self.assertEqual(entry['image_url'], '/api/blog/categories/cooking/image/')
+
+    def test_post_list_embeds_category_image_url(self):
+        """Blog post list responses expose the redirect path on the nested category."""
+        cat = Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        make_post('P1', self.editor, status='published', category=cat, slug='p1')
+        response = self.client.get('/api/blog/posts/')
+        data = json.loads(response.content)
+        post = next(p for p in data if p['slug'] == 'p1')
+        self.assertEqual(post['category']['image_url'], '/api/blog/categories/cooking/image/')
+
 
 # ---------------------------------------------------------------------------
 # Blog Post List Tests
@@ -2574,6 +2596,128 @@ class AdminCategoryManagementTests(TestCase):
             data={'file': bad},
         )
         self.assertEqual(r.status_code, 400)
+
+    def test_upload_category_image_replaces_and_deletes_old_file(self):
+        """Replacing a category image must not orphan the previous stored file."""
+        from django.core.files.storage import default_storage
+        self.admin_client.post(
+            f'/api/admin/categories/{self.cat.id}/image/',
+            data={'file': _png_file('first.png')},
+        )
+        self.cat.refresh_from_db()
+        old_key = self.cat.image_url
+        self.assertTrue(default_storage.exists(old_key))
+
+        self.admin_client.post(
+            f'/api/admin/categories/{self.cat.id}/image/',
+            data={'file': _png_file('second.png')},
+        )
+        self.cat.refresh_from_db()
+        new_key = self.cat.image_url
+        self.assertNotEqual(old_key, new_key)
+        self.assertFalse(default_storage.exists(old_key))
+        self.assertTrue(default_storage.exists(new_key))
+
+    def test_delete_category_removes_stored_image_file(self):
+        from django.core.files.storage import default_storage
+        self.admin_client.post(
+            f'/api/admin/categories/{self.cat.id}/image/',
+            data={'file': _png_file()},
+        )
+        self.cat.refresh_from_db()
+        key = self.cat.image_url
+        self.assertTrue(default_storage.exists(key))
+
+        self.admin_client.delete(f'/api/admin/categories/{self.cat.id}/')
+        self.assertFalse(default_storage.exists(key))
+
+    def test_delete_category_image_clears_field_and_file(self):
+        from django.core.files.storage import default_storage
+        self.admin_client.post(
+            f'/api/admin/categories/{self.cat.id}/image/',
+            data={'file': _png_file()},
+        )
+        self.cat.refresh_from_db()
+        key = self.cat.image_url
+
+        r = self.admin_client.delete(f'/api/admin/categories/{self.cat.id}/image/')
+        self.assertEqual(r.status_code, 200)
+        self.cat.refresh_from_db()
+        self.assertEqual(self.cat.image_url, '')
+        self.assertFalse(default_storage.exists(key))
+        data = json.loads(r.content)
+        self.assertEqual(data['image_url'], '')
+
+    def test_delete_category_image_when_none_still_succeeds(self):
+        r = self.admin_client.delete(f'/api/admin/categories/{self.cat.id}/image/')
+        self.assertEqual(r.status_code, 200)
+        self.cat.refresh_from_db()
+        self.assertEqual(self.cat.image_url, '')
+
+    def test_delete_category_image_requires_admin(self):
+        r = jwt_client(self.editor).delete(f'/api/admin/categories/{self.cat.id}/image/')
+        self.assertEqual(r.status_code, 403)
+
+    def test_delete_category_image_nonexistent_returns_404(self):
+        r = self.admin_client.delete('/api/admin/categories/99999/image/')
+        self.assertEqual(r.status_code, 404)
+
+
+class CategoryImageRedirectTests(TestCase):
+    """Tests for GET /api/blog/categories/{slug}/image/ (public 302 redirect)."""
+
+    def setUp(self):
+        self.client = Client()
+
+    def test_redirects_when_image_exists(self):
+        cat = Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        r = self.client.get(f'/api/blog/categories/{cat.slug}/image/')
+        self.assertEqual(r.status_code, 302)
+        self.assertIn('/media/category_images/abc.png', r['Location'])
+
+    def test_redirect_location_is_absolute(self):
+        """Local MEDIA_URL paths must be made absolute so browsers can follow them."""
+        cat = Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        r = self.client.get(f'/api/blog/categories/{cat.slug}/image/')
+        self.assertTrue(r['Location'].startswith('http'))
+
+    def test_redirect_is_not_cacheable(self):
+        """Cache-Control: no-store — a cached redirect would pin an expired signed URL."""
+        cat = Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        r = self.client.get(f'/api/blog/categories/{cat.slug}/image/')
+        self.assertEqual(r['Cache-Control'], 'no-store')
+
+    def test_unknown_slug_returns_404(self):
+        r = self.client.get('/api/blog/categories/nope/image/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_category_without_image_returns_404(self):
+        Category.objects.create(name='Cooking', slug='cooking')
+        r = self.client.get('/api/blog/categories/cooking/image/')
+        self.assertEqual(r.status_code, 404)
+
+    def test_is_public_no_auth_required(self):
+        Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        r = Client().get('/api/blog/categories/cooking/image/')
+        self.assertEqual(r.status_code, 302)
+
+    @override_settings(
+        AWS_STORAGE_BUCKET_NAME='test-bucket',
+        AWS_S3_ENDPOINT_URL='https://s3.example.com',
+        AWS_S3_REGION_NAME='auto',
+        AWS_ACCESS_KEY_ID='test-key',
+        AWS_SECRET_ACCESS_KEY='test-secret',
+        AWS_S3_USE_SSL=True,
+    )
+    def test_redirects_to_signed_url_when_bucket_configured(self):
+        cat = Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        with patch('boto3.client') as mock_client:
+            mock_client.return_value.generate_presigned_url.return_value = (
+                'https://s3.example.com/test-bucket/category_images/abc.png?X-Amz-Signature=fake'
+            )
+            r = self.client.get('/api/blog/categories/cooking/image/')
+        self.assertEqual(r.status_code, 302)
+        self.assertIn('X-Amz-Signature=fake', r['Location'])
 
 
 class AdminRecipeTests(TestCase):

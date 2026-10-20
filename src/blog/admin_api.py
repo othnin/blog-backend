@@ -138,6 +138,20 @@ def _build_category_out(category) -> AdminCategoryOut:
     )
 
 
+def _delete_category_image_file(key) -> None:
+    """Best-effort delete of a stored category image; never raises.
+
+    The prefix check keeps us from deleting keys outside category_images/
+    even if a bad value ever lands in image_url.
+    """
+    if not key or not key.startswith('category_images/'):
+        return
+    try:
+        default_storage.delete(key)
+    except Exception as e:
+        logger.warning(f"Failed to delete category image '{key}': {e}")
+
+
 @api_controller("/admin", tags=["Admin"], auth=JWTAuth(), permissions=[IsAuthenticated, IsAdmin])
 class AdminController:
     """
@@ -522,7 +536,7 @@ class AdminController:
 
     @http_post("/categories/{category_id}/image/", response=AdminCategoryOut)
     def upload_category_image(self, category_id: int, file: UploadedFile = File(...)) -> AdminCategoryOut:
-        """Upload an image for a category."""
+        """Upload an image for a category. Replaces (and deletes) any existing image."""
         category = get_object_or_404(Category, id=category_id)
         allowed = {'image/jpeg', 'image/png', 'image/gif', 'image/webp'}
         if file.content_type not in allowed:
@@ -534,16 +548,31 @@ class AdminController:
         filename = f"{uuid.uuid4().hex}{ext}"
         key = f"category_images/{filename}"
 
+        old_key = category.image_url
         saved_path = default_storage.save(key, file)
         category.image_url = saved_path
         category.save(update_fields=['image_url', 'updated_at'])
+        if old_key and old_key != saved_path:
+            _delete_category_image_file(old_key)
+        return _build_category_out(category)
+
+    @http_delete("/categories/{category_id}/image/", response=AdminCategoryOut)
+    def delete_category_image(self, category_id: int) -> AdminCategoryOut:
+        """Remove a category's image (clears the field and deletes the stored file)."""
+        category = get_object_or_404(Category, id=category_id)
+        old_key = category.image_url
+        category.image_url = ''
+        category.save(update_fields=['image_url', 'updated_at'])
+        _delete_category_image_file(old_key)
         return _build_category_out(category)
 
     @http_delete("/categories/{category_id}/")
     def delete_category(self, category_id: int) -> dict:
         """Delete a category. Posts in this category will have their category cleared."""
         category = get_object_or_404(Category, id=category_id)
+        image_key = category.image_url
         category.delete()
+        _delete_category_image_file(image_key)
         return {"message": "Category deleted successfully"}
 
     # ── Recipe Moderation ──────────────────────────────────────────────────────
