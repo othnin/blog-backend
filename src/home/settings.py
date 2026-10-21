@@ -90,6 +90,7 @@ INSTALLED_APPS = [
     "blog",
     "recipes",
     "locations",
+    "thales",
 ]
 
 MIDDLEWARE = [
@@ -499,5 +500,6 @@ LOGGING = {
         'blog': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'recipes': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'auth_app': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
+        'thales': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
     },
 }

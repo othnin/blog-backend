@@ -1,0 +1,968 @@
+{
+  "bases": {
+    "adenine": {
+      "symbol": "A",
+      "category": "purine",
+      "atoms": [
+        {
+          "id": "N1",
+          "element": "N",
+          "position": [
+            -1.2,
+            -0.7,
+            0
+          ]
+        },
+        {
+          "id": "C2",
+          "element": "C",
+          "position": [
+            -1.2,
+            0.7,
+            0
+          ]
+        },
+        {
+          "id": "N3",
+          "element": "N",
+          "position": [
+            0,
+            1.4,
+            0
+          ]
+        },
+        {
+          "id": "C4",
+          "element": "C",
+          "position": [
+            1.2,
+            0.7,
+            0
+          ]
+        },
+        {
+          "id": "C5",
+          "element": "C",
+          "position": [
+            1.2,
+            -0.7,
+            0
+          ]
+        },
+        {
+          "id": "C6",
+          "element": "C",
+          "position": [
+            0,
+            -1.4,
+            0
+          ]
+        },
+        {
+          "id": "N7",
+          "element": "N",
+          "position": [
+            2.4,
+            -1.4,
+            0
+          ]
+        },
+        {
+          "id": "C8",
+          "element": "C",
+          "position": [
+            3,
+            -0.2,
+            0
+          ]
+        },
+        {
+          "id": "N9",
+          "element": "N",
+          "position": [
+            2.4,
+            1,
+            0
+          ]
+        },
+        {
+          "id": "N6A",
+          "element": "N",
+          "position": [
+            0,
+            -2.8,
+            0
+          ]
+        },
+        {
+          "id": "H6A1",
+          "element": "H",
+          "position": [
+            -0.8746856578222831,
+            -2.8,
+            0.5049999999999999
+          ]
+        },
+        {
+          "id": "H6A2",
+          "element": "H",
+          "position": [
+            0.8746856578222831,
+            -2.8,
+            0.5049999999999999
+          ]
+        },
+        {
+          "id": "H2",
+          "element": "H",
+          "position": [
+            -2.1451849463002377,
+            1.242886191837126,
+            0
+          ]
+        },
+        {
+          "id": "H8",
+          "element": "H",
+          "position": [
+            4.09,
+            -0.2,
+            0
+          ]
+        },
+        {
+          "id": "H61",
+          "element": "H",
+          "position": [
+            2.7145040431601006,
+            1.7862601079002527,
+            0.5504382341013682
+          ]
+        }
+      ],
+      "bonds": [
+        {
+          "atom1": "N1",
+          "atom2": "C2",
+          "type": "single"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "N3",
+          "type": "double"
+        },
+        {
+          "atom1": "N3",
+          "atom2": "C4",
+          "type": "single"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "C5",
+          "type": "double"
+        },
+        {
+          "atom1": "C5",
+          "atom2": "C6",
+          "type": "single"
+        },
+        {
+          "atom1": "C6",
+          "atom2": "N1",
+          "type": "double"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "N9",
+          "type": "single"
+        },
+        {
+          "atom1": "N9",
+          "atom2": "C8",
+          "type": "single"
+        },
+        {
+          "atom1": "C8",
+          "atom2": "N7",
+          "type": "double"
+        },
+        {
+          "atom1": "N7",
+          "atom2": "C5",
+          "type": "single"
+        },
+        {
+          "atom1": "C6",
+          "atom2": "N6A",
+          "type": "single"
+        },
+        {
+          "atom1": "N6A",
+          "atom2": "H6A1",
+          "type": "single"
+        },
+        {
+          "atom1": "N6A",
+          "atom2": "H6A2",
+          "type": "single"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "H2",
+          "type": "single"
+        },
+        {
+          "atom1": "C8",
+          "atom2": "H8",
+          "type": "single"
+        },
+        {
+          "atom1": "N9",
+          "atom2": "H61",
+          "type": "single"
+        }
+      ],
+      "hydrogenBondSites": [
+        {
+          "id": "HB_N1",
+          "atom": "N1",
+          "type": "acceptor",
+          "roles": [
+            "watson_crick"
+          ]
+        },
+        {
+          "id": "HB_N6",
+          "atom": "N6A",
+          "type": "donor",
+          "roles": [
+            "watson_crick"
+          ]
+        }
+      ],
+      "attachmentPoints": [
+        {
+          "name": "sugar_link",
+          "position": [
+            2.4,
+            1,
+            -1.4
+          ],
+          "orientation": [
+            0,
+            0,
+            -1
+          ]
+        }
+      ]
+    },
+    "guanine": {
+      "symbol": "G",
+      "category": "purine",
+      "atoms": [
+        {
+          "id": "N1",
+          "element": "N",
+          "position": [
+            -1.2,
+            -0.7,
+            0
+          ]
+        },
+        {
+          "id": "C2",
+          "element": "C",
+          "position": [
+            -1.2,
+            0.7,
+            0
+          ]
+        },
+        {
+          "id": "N2",
+          "element": "N",
+          "position": [
+            -2.4,
+            1.4,
+            0
+          ]
+        },
+        {
+          "id": "N3",
+          "element": "N",
+          "position": [
+            0,
+            1.4,
+            0
+          ]
+        },
+        {
+          "id": "C4",
+          "element": "C",
+          "position": [
+            1.2,
+            0.7,
+            0
+          ]
+        },
+        {
+          "id": "C5",
+          "element": "C",
+          "position": [
+            1.2,
+            -0.7,
+            0
+          ]
+        },
+        {
+          "id": "O6",
+          "element": "O",
+          "position": [
+            0,
+            -2.8,
+            0
+          ]
+        },
+        {
+          "id": "C6",
+          "element": "C",
+          "position": [
+            0,
+            -1.4,
+            0
+          ]
+        },
+        {
+          "id": "N7",
+          "element": "N",
+          "position": [
+            2.4,
+            -1.4,
+            0
+          ]
+        },
+        {
+          "id": "C8",
+          "element": "C",
+          "position": [
+            3,
+            -0.2,
+            0
+          ]
+        },
+        {
+          "id": "N9",
+          "element": "N",
+          "position": [
+            2.4,
+            1,
+            0
+          ]
+        },
+        {
+          "id": "H2A",
+          "element": "H",
+          "position": [
+            -1.9592712405818762,
+            2.155535016145355,
+            0.5049999999999999
+          ]
+        },
+        {
+          "id": "H2B",
+          "element": "H",
+          "position": [
+            -2.840728759418124,
+            0.6444649838546449,
+            0.5049999999999999
+          ]
+        },
+        {
+          "id": "H8",
+          "element": "H",
+          "position": [
+            4.09,
+            -0.2,
+            0
+          ]
+        },
+        {
+          "id": "H1",
+          "element": "H",
+          "position": [
+            -1.9314722044070067,
+            -1.1266921192374206,
+            0.5504382341013682
+          ]
+        },
+        {
+          "id": "H61",
+          "element": "H",
+          "position": [
+            2.7145040431601006,
+            1.7862601079002527,
+            0.5504382341013682
+          ]
+        }
+      ],
+      "bonds": [
+        {
+          "atom1": "N1",
+          "atom2": "C2",
+          "type": "single"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "N2",
+          "type": "single"
+        },
+        {
+          "atom1": "N2",
+          "atom2": "H2A",
+          "type": "single"
+        },
+        {
+          "atom1": "N2",
+          "atom2": "H2B",
+          "type": "single"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "N3",
+          "type": "double"
+        },
+        {
+          "atom1": "N3",
+          "atom2": "C4",
+          "type": "single"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "C5",
+          "type": "double"
+        },
+        {
+          "atom1": "C5",
+          "atom2": "C6",
+          "type": "single"
+        },
+        {
+          "atom1": "C6",
+          "atom2": "N1",
+          "type": "double"
+        },
+        {
+          "atom1": "C6",
+          "atom2": "O6",
+          "type": "double"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "N9",
+          "type": "single"
+        },
+        {
+          "atom1": "N9",
+          "atom2": "C8",
+          "type": "single"
+        },
+        {
+          "atom1": "C8",
+          "atom2": "N7",
+          "type": "double"
+        },
+        {
+          "atom1": "N7",
+          "atom2": "C5",
+          "type": "single"
+        },
+        {
+          "atom1": "C8",
+          "atom2": "H8",
+          "type": "single"
+        },
+        {
+          "atom1": "N1",
+          "atom2": "H1",
+          "type": "single"
+        },
+        {
+          "atom1": "N9",
+          "atom2": "H61",
+          "type": "single"
+        }
+      ],
+      "hydrogenBondSites": [
+        {
+          "id": "HB_O6",
+          "atom": "O6",
+          "type": "acceptor",
+          "roles": []
+        },
+        {
+          "id": "HB_N2",
+          "atom": "N2",
+          "type": "donor",
+          "roles": []
+        },
+        {
+          "id": "HB_N7",
+          "atom": "N7",
+          "type": "acceptor",
+          "roles": []
+        }
+      ],
+      "attachmentPoints": [
+        {
+          "name": "sugar_link",
+          "position": [
+            2.4,
+            1,
+            -1.4
+          ],
+          "orientation": [
+            0,
+            0,
+            -1
+          ]
+        }
+      ]
+    },
+    "thymine": {
+      "symbol": "T",
+      "category": "pyrimidine",
+      "atoms": [
+        {
+          "id": "N1",
+          "element": "N",
+          "position": [
+            -0.7,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "C2",
+          "element": "C",
+          "position": [
+            0,
+            1.2,
+            0
+          ]
+        },
+        {
+          "id": "O2",
+          "element": "O",
+          "position": [
+            1.4,
+            1.2,
+            0
+          ]
+        },
+        {
+          "id": "N3",
+          "element": "N",
+          "position": [
+            -0.7,
+            2.4,
+            0
+          ]
+        },
+        {
+          "id": "C4",
+          "element": "C",
+          "position": [
+            -2.1,
+            2.4,
+            0
+          ]
+        },
+        {
+          "id": "O4",
+          "element": "O",
+          "position": [
+            -2.8,
+            3.6,
+            0
+          ]
+        },
+        {
+          "id": "C5",
+          "element": "C",
+          "position": [
+            -2.8,
+            1.2,
+            0
+          ]
+        },
+        {
+          "id": "C5M",
+          "element": "C",
+          "position": [
+            -4.2,
+            1.2,
+            0
+          ]
+        },
+        {
+          "id": "C6",
+          "element": "C",
+          "position": [
+            -2.1,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "H1",
+          "element": "H",
+          "position": [
+            -0.2733078807625792,
+            -0.7314722044070068,
+            0.5504382341013682
+          ]
+        },
+        {
+          "id": "H3",
+          "element": "H",
+          "position": [
+            -0.2733078807625792,
+            3.1314722044070065,
+            0.5504382341013682
+          ]
+        },
+        {
+          "id": "H5M1",
+          "element": "H",
+          "position": [
+            -4.5633333333333335,
+            1.2,
+            1.0276618553244492
+          ]
+        },
+        {
+          "id": "H5M2",
+          "element": "H",
+          "position": [
+            -4.5633333333333335,
+            0.3100187267887785,
+            -0.5138309276622244
+          ]
+        },
+        {
+          "id": "H5M3",
+          "element": "H",
+          "position": [
+            -4.5633333333333335,
+            2.0899812732112215,
+            -0.513830927662225
+          ]
+        }
+      ],
+      "bonds": [
+        {
+          "atom1": "N1",
+          "atom2": "C2",
+          "type": "single"
+        },
+        {
+          "atom1": "N1",
+          "atom2": "H1",
+          "type": "single"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "O2",
+          "type": "double"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "N3",
+          "type": "single"
+        },
+        {
+          "atom1": "N3",
+          "atom2": "C4",
+          "type": "single"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "O4",
+          "type": "double"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "C5",
+          "type": "single"
+        },
+        {
+          "atom1": "C5",
+          "atom2": "C5M",
+          "type": "single"
+        },
+        {
+          "atom1": "C5",
+          "atom2": "C6",
+          "type": "double"
+        },
+        {
+          "atom1": "C6",
+          "atom2": "N1",
+          "type": "single"
+        },
+        {
+          "atom1": "N3",
+          "atom2": "H3",
+          "type": "single"
+        },
+        {
+          "atom1": "C5M",
+          "atom2": "H5M1",
+          "type": "single"
+        },
+        {
+          "atom1": "C5M",
+          "atom2": "H5M2",
+          "type": "single"
+        },
+        {
+          "atom1": "C5M",
+          "atom2": "H5M3",
+          "type": "single"
+        }
+      ],
+      "hydrogenBondSites": [
+        {
+          "id": "HB_O2",
+          "atom": "O2",
+          "type": "acceptor",
+          "roles": []
+        },
+        {
+          "id": "HB_O4",
+          "atom": "O4",
+          "type": "acceptor",
+          "roles": []
+        }
+      ],
+      "attachmentPoints": [
+        {
+          "name": "sugar_link",
+          "position": [
+            -2.1,
+            -1.2,
+            0
+          ],
+          "orientation": [
+            0,
+            -1,
+            0
+          ]
+        }
+      ]
+    },
+    "cytosine": {
+      "symbol": "C",
+      "category": "pyrimidine",
+      "atoms": [
+        {
+          "id": "N1",
+          "element": "N",
+          "position": [
+            -0.7,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "C2",
+          "element": "C",
+          "position": [
+            0,
+            1.2,
+            0
+          ]
+        },
+        {
+          "id": "O2",
+          "element": "O",
+          "position": [
+            1.4,
+            1.2,
+            0
+          ]
+        },
+        {
+          "id": "N3",
+          "element": "N",
+          "position": [
+            -0.7,
+            2.4,
+            0
+          ]
+        },
+        {
+          "id": "C4",
+          "element": "C",
+          "position": [
+            -2.1,
+            2.4,
+            0
+          ]
+        },
+        {
+          "id": "N4",
+          "element": "N",
+          "position": [
+            -2.8,
+            3.6,
+            0
+          ]
+        },
+        {
+          "id": "C5",
+          "element": "C",
+          "position": [
+            -2.8,
+            1.2,
+            0
+          ]
+        },
+        {
+          "id": "C6",
+          "element": "C",
+          "position": [
+            -2.1,
+            0,
+            0
+          ]
+        },
+        {
+          "id": "H1",
+          "element": "H",
+          "position": [
+            -0.2733078807625792,
+            -0.7314722044070068,
+            0.5504382341013682
+          ]
+        },
+        {
+          "id": "H4A",
+          "element": "H",
+          "position": [
+            -2.0444649838546445,
+            4.040728759418124,
+            0.5049999999999999
+          ]
+        },
+        {
+          "id": "H4B",
+          "element": "H",
+          "position": [
+            -3.555535016145355,
+            3.1592712405818766,
+            0.5049999999999999
+          ]
+        }
+      ],
+      "bonds": [
+        {
+          "atom1": "N1",
+          "atom2": "C2",
+          "type": "single"
+        },
+        {
+          "atom1": "N1",
+          "atom2": "H1",
+          "type": "single"
+        },
+        {
+          "atom1": "N1",
+          "atom2": "C6",
+          "type": "single"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "O2",
+          "type": "double"
+        },
+        {
+          "atom1": "C2",
+          "atom2": "N3",
+          "type": "single"
+        },
+        {
+          "atom1": "N3",
+          "atom2": "C4",
+          "type": "double"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "N4",
+          "type": "single"
+        },
+        {
+          "atom1": "N4",
+          "atom2": "H4A",
+          "type": "single"
+        },
+        {
+          "atom1": "N4",
+          "atom2": "H4B",
+          "type": "single"
+        },
+        {
+          "atom1": "C4",
+          "atom2": "C5",
+          "type": "single"
+        },
+        {
+          "atom1": "C5",
+          "atom2": "C6",
+          "type": "double"
+        }
+      ],
+      "hydrogenBondSites": [
+        {
+          "id": "HB_O2",
+          "atom": "O2",
+          "type": "acceptor",
+          "roles": [
+            "watson_crick"
+          ]
+        },
+        {
+          "id": "HB_N3",
+          "atom": "N3",
+          "type": "acceptor",
+          "roles": [
+            "watson_crick"
+          ]
+        },
+        {
+          "id": "HB_N4",
+          "atom": "N4",
+          "type": "donor",
+          "roles": [
+            "watson_crick"
+          ]
+        }
+      ],
+      "attachmentPoints": [
+        {
+          "name": "sugar_link",
+          "position": [
+            -2.1,
+            -1.2,
+            0
+          ],
+          "orientation": [
+            0,
+            -1,
+            0
+          ]
+        }
+      ]
+    }
+  }
+}

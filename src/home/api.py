@@ -22,6 +22,7 @@ from locations.api import (
     RestaurantController,
     RestaurantDetailController,
 )
+from thales.urls import router as thales_router
 from auth_app.serializers import LoginSerializer
 from django.http import JsonResponse
 from django.contrib.auth import authenticate
@@ -218,6 +219,7 @@ def blacklist_token_view(request, data: RefreshTokenIn):
 
 api.add_router("/token/", token_router)
 api.add_router("/auth/", auth_router)
+api.add_router("/thales/", thales_router)  # everything Thales, incl. /thales/molecules/
 api.register_controllers(BlogController)
 api.register_controllers(CommentController)
 api.register_controllers(AdminController)
