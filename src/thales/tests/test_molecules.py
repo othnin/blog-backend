@@ -16,6 +16,7 @@ from thales.molecules.schemas import (
 from thales.molecules.rdkit_validator import RDKitValidator
 from thales.molecules.geometry_engine import GeometryEngine
 from thales.molecules.templates import CanonicalATPair
+from thales.tests.utils import authenticate, make_thales_user
 
 
 class MoleculeSchemaTestCase(TestCase):
@@ -582,8 +583,10 @@ class MoleculeAPITestCase(TestCase):
     """Integration tests for molecule API endpoints."""
     
     def setUp(self):
-        """Set up test client."""
+        """Set up an authorized test client."""
         self.client = DjangoClient()
+        self.user = make_thales_user("molecules-api-user")
+        authenticate(self.client, self.user)
     
     def test_get_molecule_adenine(self):
         """Test GET /api/thales/molecules/adenine returns adenine topology."""

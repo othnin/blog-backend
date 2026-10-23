@@ -16,12 +16,24 @@ handling, because the Vite build emits absolute /thales/assets/... URLs (see
 the `base` option in vite.config.ts). Keeping both routes under one prefix
 means the whole lab is one URL namespace, and removing it is a matter of
 deleting this app plus two lines in home/urls.py.
+
+Access control lives here and in helpers/api_auth.py: the index is only served
+to a logged-in user holding the Thales permission, while the hashed assets stay
+public. The page reads the blog's HttpOnly JWT cookies, which reach Django
+because blog-frontend/src/middleware.ts proxies /thales/* through the frontend
+origin. Unauthenticated visitors are sent to the site's login page with a
+return path so they land back in the lab.
 """
 
 import mimetypes
 from pathlib import Path
 
-from django.http import FileResponse, HttpResponse
+from django.conf import settings
+from django.http import FileResponse, HttpResponse, HttpResponseForbidden
+from django.shortcuts import redirect
+
+from auth_app.permissions import has_thales_access
+from helpers.api_auth import user_from_session_cookies
 
 # The built bundle lives inside the app, so it ships with the image and is
 # never collected into STATIC_ROOT.
@@ -41,7 +53,17 @@ NOT_BUILT_MESSAGE = (
 
 
 def thales_index(request):
-    """Serve the built SPA entrypoint."""
+    """Serve the built SPA entrypoint to authorized users only."""
+    user = user_from_session_cookies(request)
+    if user is None:
+        login_url = f"{settings.FRONTEND_URL.rstrip('/')}/login?next=/thales/"
+        return redirect(login_url)
+
+    if not has_thales_access(user):
+        return HttpResponseForbidden(
+            "Your account does not have access to the Thales lab."
+        )
+
     if not INDEX_FILE.exists():
         return HttpResponse(NOT_BUILT_MESSAGE, status=503, content_type="text/plain")
 

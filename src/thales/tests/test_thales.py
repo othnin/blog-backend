@@ -1,7 +1,17 @@
+from django.conf import settings
 from django.test import TestCase, Client
 from thales.models import Lesson, StudentProgress, AssistantInteraction, ModelExperiment
 from thales.molecular_data import get_base, is_purine, is_pyrimidine, get_all_bases
 from thales.validation import MolecularValidator
+from thales.tests.utils import (
+    access_token_for,
+    authenticate,
+    make_thales_user,
+    refresh_token_for,
+    thales_group_has_permission,
+)
+from thales.spa import ASSETS_DIR
+from auth_app.permissions import THALES_PERMISSION_CODENAME, THALES_PERMISSION_NAME
 import json
 
 
@@ -201,6 +211,8 @@ class MolecularValidationTest(TestCase):
 class ThalesAPITest(TestCase):
     def setUp(self):
         self.client = Client()
+        self.user = make_thales_user("thales-api-user")
+        authenticate(self.client, self.user)
         # Create test lesson
         self.lesson = Lesson.objects.create(
             title="Test Lesson",
@@ -240,3 +252,137 @@ class ThalesAPITest(TestCase):
         data = response.json()
         self.assertEqual(len(data), 1)
         self.assertEqual(data[0]['title'], 'Test Lesson')
+
+
+class ThalesAccessControlTest(TestCase):
+    """The lab is a separate access axis from the blog role."""
+
+    def setUp(self):
+        self.client = Client()
+        Lesson.objects.create(
+            title="Test Lesson",
+            description="Test",
+            mode=Lesson.CLASSROOM,
+            sequence_order=1,
+        )
+
+    def test_thales_group_has_permission(self):
+        self.assertTrue(thales_group_has_permission())
+        self.assertIn(
+            (THALES_PERMISSION_CODENAME, THALES_PERMISSION_NAME),
+            Lesson._meta.permissions,
+        )
+
+    # -- page ------------------------------------------------------------
+
+    def test_page_redirects_anonymous_user_to_login(self):
+        response = self.client.get('/thales/')
+
+        self.assertEqual(response.status_code, 302)
+        self.assertTrue(response.url.startswith(settings.FRONTEND_URL.rstrip('/')))
+        self.assertIn('/login?next=/thales/', response.url)
+
+    def test_page_denies_logged_in_user_without_thales_access(self):
+        user = make_thales_user('no-thales-access', thales=False)
+        authenticate(self.client, user)
+
+        self.assertEqual(self.client.get('/thales/').status_code, 403)
+
+    def test_page_allows_thales_group_member(self):
+        user = make_thales_user('thales-member')
+        authenticate(self.client, user)
+
+        self.assertEqual(self.client.get('/thales/').status_code, 200)
+
+    def test_page_allows_admin_without_group(self):
+        user = make_thales_user('admin-no-group', role='admin', thales=False)
+        authenticate(self.client, user)
+
+        self.assertEqual(self.client.get('/thales/').status_code, 200)
+
+    def test_page_denies_suspended_member(self):
+        user = make_thales_user('suspended-member', suspended=True)
+        authenticate(self.client, user)
+
+        # Suspension is treated as no session at all.
+        self.assertEqual(self.client.get('/thales/').status_code, 302)
+
+    def test_page_falls_back_to_refresh_token(self):
+        user = make_thales_user('refresh-cookie-member')
+        # The access token is gone/expired; the page should still load, and the
+        # API client will refresh on its first 401.
+        self.client.cookies['auth-token'] = 'expired-access-token'
+        self.client.cookies['auth-refresh-token'] = refresh_token_for(user)
+
+        self.assertEqual(self.client.get('/thales/').status_code, 200)
+
+    def test_page_assets_stay_public(self):
+        asset = next(ASSETS_DIR.glob('*.js'))
+
+        response = self.client.get(f'/thales/assets/{asset.name}')
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_editor_with_thales_group_keeps_both_capabilities(self):
+        user = make_thales_user('editor-with-thales', role='editor')
+        authenticate(self.client, user)
+
+        self.assertEqual(user.profile.role, 'editor')
+        self.assertEqual(self.client.get('/thales/').status_code, 200)
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 200)
+
+    # -- API -------------------------------------------------------------
+
+    def test_api_requires_authentication(self):
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 401)
+
+    def test_api_denies_logged_in_user_without_thales_access(self):
+        user = make_thales_user('api-no-thales-access', thales=False)
+        authenticate(self.client, user)
+
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 403)
+
+    def test_api_allows_thales_group_member(self):
+        user = make_thales_user('api-thales-member')
+        authenticate(self.client, user)
+
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 200)
+
+    def test_api_allows_admin_without_group(self):
+        user = make_thales_user('api-admin-no-group', role='admin', thales=False)
+        authenticate(self.client, user)
+
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 200)
+
+    def test_api_allows_superuser_without_group(self):
+        user = make_thales_user('api-superuser', thales=False, superuser=True)
+        authenticate(self.client, user)
+
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 200)
+
+    def test_api_accepts_bearer_header(self):
+        user = make_thales_user('api-header-user')
+        token = access_token_for(user)
+
+        response = self.client.get(
+            '/api/thales/lessons/',
+            HTTP_AUTHORIZATION=f'Bearer {token}',
+        )
+
+        self.assertEqual(response.status_code, 200)
+
+    def test_api_rejects_invalid_cookie_token(self):
+        self.client.cookies['auth-token'] = 'not-a-token'
+
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 401)
+
+    def test_api_does_not_accept_refresh_cookie(self):
+        user = make_thales_user('refresh-only-api-member')
+        self.client.cookies['auth-refresh-token'] = refresh_token_for(user)
+
+        # The page may fall back to the refresh token; the API may not. The
+        # client is expected to exchange it for a new access token first.
+        self.assertEqual(self.client.get('/api/thales/lessons/').status_code, 401)
+
+    def test_molecules_router_is_protected_too(self):
+        self.assertEqual(self.client.get('/api/thales/molecules/adenine').status_code, 401)

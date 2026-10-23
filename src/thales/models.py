@@ -22,6 +22,12 @@ class Lesson(models.Model):
     class Meta:
         ordering = ['mode', 'sequence_order']
         unique_together = ('mode', 'sequence_order')
+        # Thales access is one capability for the whole lab, not a per-lesson
+        # grant. Django needs a model to attach a permission to, so it lives
+        # here; membership in the Thales group is what actually grants it.
+        permissions = [
+            ('access_thales', 'Can access the Thales lab'),
+        ]
 
     def __str__(self):
         return f"{self.get_mode_display()} - {self.title}"

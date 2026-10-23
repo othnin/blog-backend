@@ -7,12 +7,13 @@ from typing import Dict
 from ninja import Router
 from ninja.errors import HttpError
 
+from helpers.api_auth import ThalesAccessJWTAuth
 from .schemas import MoleculeDefinition, BasePairRequest, BasePairResponse
 from .rdkit_validator import RDKitValidator
 from .geometry_engine import GeometryEngine
 from .templates import CanonicalATPair, CanonicalGCPair
 
-router = Router()
+router = Router(auth=[ThalesAccessJWTAuth()])
 MOLECULES: Dict[str, MoleculeDefinition] = {}
 
 

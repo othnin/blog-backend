@@ -4,6 +4,7 @@ Admin configuration for authentication models.
 from django.contrib import admin
 from home.blog_admin import blog_admin_site
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
+from auth_app.permissions import has_thales_access
 
 
 class EmailVerificationTokenAdmin(admin.ModelAdmin):
@@ -29,10 +30,15 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
 
 
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'email_verified', 'created_at', 'updated_at', 'role', 'avatar')
+    list_display = ('user', 'email_verified', 'created_at', 'updated_at', 'role', 'thales_access', 'avatar')
     list_filter = ('email_verified', 'created_at', 'role')
     search_fields = ('user__email', 'user__username')
     readonly_fields = ('created_at', 'updated_at')
+
+    @admin.display(boolean=True, description='Thales access')
+    def thales_access(self, obj):
+        """Show the permission granted by the Thales group (admins bypass it)."""
+        return has_thales_access(obj.user)
 
 
 # Register with custom admin site
