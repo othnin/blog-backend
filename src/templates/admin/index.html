@@ -1,0 +1,31 @@
+{% extends "admin/index.html" %}
+{% load static %}
+
+{% block extrastyle %}
+{{ block.super }}
+<link rel="stylesheet" href="{% static 'admin/css/thales_admin.css' %}">
+{% endblock %}
+
+{% block content %}
+<div id="content-main">
+  {% if thales_help_available or True %}
+  <div class="module thales-help-card" style="margin-bottom: 20px;">
+    <h2 style="background: #417690; color: white; padding: 10px 15px; margin: -15px -15px 15px -15px;">🔬 Thales Lab Access Guide</h2>
+    <p>Need to grant someone access to the Thales DNA Lab? Here's how:</p>
+    <ul>
+      <li><strong>Quick way:</strong> Add users to the <code>Thales</code> group in Authentication → Groups</li>
+      <li><strong>Admins bypass:</strong> Superusers and users with role "admin" have access automatically</li>
+      <li><strong>Verify:</strong> Check the "Thales access" column in Auth → User profiles</li>
+    </ul>
+    <button type="button" class="thales-help-btn" onclick="showThalesHelp()">View Full Step-by-Step Guide</button>
+  </div>
+  {% endif %}
+
+  {{ block.super }}
+</div>
+{% endblock %}
+
+{% block footer %}
+{{ block.super }}
+<script src="{% static 'admin/js/thales_help.js' %}"></script>
+{% endblock %}
