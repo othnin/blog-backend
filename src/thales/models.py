@@ -36,6 +36,13 @@ class Lesson(models.Model):
 class StudentProgress(models.Model):
     """Tracks a student's progress through lessons and challenges."""
     session_id = models.CharField(max_length=100, unique=True)
+    # The authenticated learner this session belongs to. Deliberately a plain
+    # integer, not a foreign key: the lab can be removed without touching the
+    # site's auth tables. Kept nullable so older session-only rows remain valid.
+    user_id = models.PositiveIntegerField(null=True, blank=True, db_index=True)
+    # Snapshot of the username at the time of activity, so classroom records
+    # stay readable even if the account is later renamed or deleted.
+    username = models.CharField(max_length=150, blank=True, default='')
     current_lesson = models.ForeignKey(Lesson, null=True, on_delete=models.SET_NULL)
     completed_lessons = models.ManyToManyField(Lesson, related_name='completed_by', blank=True)
     state_json = models.JSONField(default=dict, help_text="Challenge state, unlocked evidence, etc.")
@@ -58,6 +65,7 @@ class AssistantInteraction(models.Model):
     ]
 
     progress = models.ForeignKey(StudentProgress, on_delete=models.CASCADE, related_name='interactions')
+    username = models.CharField(max_length=150, blank=True, default='')
     question = models.TextField()
     response = models.TextField()
     response_type = models.CharField(max_length=20, choices=RESPONSE_TYPES)
@@ -75,6 +83,7 @@ class AssistantInteraction(models.Model):
 class ModelExperiment(models.Model):
     """Records each molecular model a student constructs and tests."""
     progress = models.ForeignKey(StudentProgress, on_delete=models.CASCADE, related_name='experiments')
+    username = models.CharField(max_length=150, blank=True, default='')
     left_base = models.CharField(max_length=2)
     right_base = models.CharField(max_length=2)
     model_state_json = models.JSONField(default=dict, help_text="Positions, rotations, etc.")
@@ -83,3 +92,14 @@ class ModelExperiment(models.Model):
 
     def __str__(self):
         return f"{self.progress.session_id}: {self.left_base}-{self.right_base} @ {self.timestamp}"
+
+
+class HypothesisNote(models.Model):
+    """One reflective hypothesis per learner. Free text, never graded."""
+    user_id = models.PositiveIntegerField(unique=True, db_index=True)
+    username = models.CharField(max_length=150, blank=True, default='')
+    text = models.TextField(blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Hypothesis: user {self.user_id}"

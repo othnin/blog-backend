@@ -1,0 +1,55 @@
+<svg viewBox="0 0 400 400" xmlns="http://www.w3.org/2000/svg">
+  <!-- Photo 51 X-ray crystallography pattern representation -->
+
+  <!-- Background (film) -->
+  <rect width="400" height="400" fill="#1a1a1a"/>
+
+  <!-- Central spot -->
+  <circle cx="200" cy="200" r="8" fill="#fff" opacity="0.9"/>
+  <circle cx="200" cy="200" r="6" fill="#f0f0f0" opacity="0.7"/>
+
+  <!-- Vertical line of spots (meridian) -->
+  <circle cx="200" cy="80" r="5" fill="#fff" opacity="0.6"/>
+  <circle cx="200" cy="120" r="4" fill="#fff" opacity="0.5"/>
+  <circle cx="200" cy="160" r="3" fill="#fff" opacity="0.4"/>
+  <circle cx="200" cy="240" r="3" fill="#fff" opacity="0.4"/>
+  <circle cx="200" cy="280" r="4" fill="#fff" opacity="0.5"/>
+  <circle cx="200" cy="320" r="5" fill="#fff" opacity="0.6"/>
+
+  <!-- Horizontal line of spots (equator) -->
+  <circle cx="80" cy="200" r="5" fill="#fff" opacity="0.6"/>
+  <circle cx="120" cy="200" r="4" fill="#fff" opacity="0.5"/>
+  <circle cx="160" cy="200" r="3" fill="#fff" opacity="0.4"/>
+  <circle cx="240" cy="200" r="3" fill="#fff" opacity="0.4"/>
+  <circle cx="280" cy="200" r="4" fill="#fff" opacity="0.5"/>
+  <circle cx="320" cy="200" r="5" fill="#fff" opacity="0.6"/>
+
+  <!-- Diagonal X pattern spots (characteristic of helix) -->
+  <!-- Upper-right quadrant -->
+  <circle cx="260" cy="140" r="3" fill="#fff" opacity="0.35"/>
+  <circle cx="300" cy="100" r="4" fill="#fff" opacity="0.45"/>
+  <circle cx="330" cy="70" r="3" fill="#fff" opacity="0.35"/>
+
+  <!-- Lower-right quadrant -->
+  <circle cx="260" cy="260" r="3" fill="#fff" opacity="0.35"/>
+  <circle cx="300" cy="300" r="4" fill="#fff" opacity="0.45"/>
+  <circle cx="330" cy="330" r="3" fill="#fff" opacity="0.35"/>
+
+  <!-- Upper-left quadrant -->
+  <circle cx="140" cy="140" r="3" fill="#fff" opacity="0.35"/>
+  <circle cx="100" cy="100" r="4" fill="#fff" opacity="0.45"/>
+  <circle cx="70" cy="70" r="3" fill="#fff" opacity="0.35"/>
+
+  <!-- Lower-left quadrant -->
+  <circle cx="140" cy="260" r="3" fill="#fff" opacity="0.35"/>
+  <circle cx="100" cy="300" r="4" fill="#fff" opacity="0.45"/>
+  <circle cx="70" cy="330" r="3" fill="#fff" opacity="0.35"/>
+
+  <!-- Additional diffraction rings/arcs to suggest the helical pattern -->
+  <circle cx="200" cy="200" r="50" fill="none" stroke="#fff" stroke-width="0.5" opacity="0.2"/>
+  <circle cx="200" cy="200" r="100" fill="none" stroke="#fff" stroke-width="0.5" opacity="0.15"/>
+  <circle cx="200" cy="200" r="150" fill="none" stroke="#fff" stroke-width="0.5" opacity="0.1"/>
+
+  <!-- Label -->
+  <text x="200" y="390" font-family="Arial, sans-serif" font-size="12" fill="#999" text-anchor="middle">Photo 51 — The Maltese Cross Pattern</text>
+</svg>

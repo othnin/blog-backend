@@ -254,6 +254,151 @@ class ThalesAPITest(TestCase):
         self.assertEqual(data[0]['title'], 'Test Lesson')
 
 
+class ThalesPersistenceAPITest(TestCase):
+    """The lab records who did what for the build bench and the advisor."""
+
+    def setUp(self):
+        self.client = Client()
+        self.user = make_thales_user('lab-learner')
+        authenticate(self.client, self.user)
+
+    def test_save_model_experiment_records_username_and_result(self):
+        payload = {
+            'left_base': 'A',
+            'right_base': 'T',
+            'model_state_json': {
+                'base1': {'id': 'adenine', 'position': [-5, 0, 0], 'rotation': [0, 0, 0]},
+                'base2': {'id': 'thymine', 'position': [5, 0, 0], 'rotation': [0, 0, 0]},
+            },
+            'validity_json': {
+                'valid': True,
+                'errors': [],
+                'hydrogenBonds': [{'id': 'HB_T_H3_A_N1', 'distance': 3.06, 'valid': True}],
+            },
+        }
+
+        response = self.client.post(
+            '/api/thales/model/save/',
+            data=json.dumps(payload),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['username'], 'lab-learner')
+        self.assertEqual(body['left_base'], 'A')
+        self.assertEqual(body['right_base'], 'T')
+
+        experiment = ModelExperiment.objects.get(id=body['id'])
+        self.assertEqual(experiment.username, 'lab-learner')
+        self.assertEqual(experiment.progress.username, 'lab-learner')
+        self.assertEqual(experiment.progress.user_id, self.user.id)
+        self.assertEqual(experiment.model_state_json, payload['model_state_json'])
+        self.assertEqual(experiment.validity_json, payload['validity_json'])
+
+    def test_save_model_experiment_reuses_one_progress_per_user(self):
+        for pair in (('A', 'T'), ('G', 'C')):
+            response = self.client.post(
+                '/api/thales/model/save/',
+                data=json.dumps({'left_base': pair[0], 'right_base': pair[1]}),
+                content_type='application/json',
+            )
+            self.assertEqual(response.status_code, 200)
+
+        self.assertEqual(ModelExperiment.objects.filter(progress__user_id=self.user.id).count(), 2)
+        self.assertEqual(StudentProgress.objects.filter(user_id=self.user.id).count(), 1)
+
+    def test_save_model_experiment_rejects_a_full_base_name(self):
+        response = self.client.post(
+            '/api/thales/model/save/',
+            data=json.dumps({'left_base': 'adenine', 'right_base': 'thymine'}),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 422)
+        self.assertEqual(ModelExperiment.objects.count(), 0)
+
+    def test_save_model_experiment_cannot_write_to_another_users_session(self):
+        other = make_thales_user('other-learner')
+        other_progress = StudentProgress.objects.create(
+            session_id='other-session',
+            user_id=other.id,
+            username=other.username,
+        )
+
+        response = self.client.post(
+            '/api/thales/model/save/',
+            data=json.dumps({
+                'session_id': other_progress.session_id,
+                'left_base': 'A',
+                'right_base': 'T',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 403)
+        self.assertEqual(ModelExperiment.objects.count(), 0)
+
+    def test_save_assistant_interaction_records_question_answer_and_username(self):
+        response = self.client.post(
+            '/api/thales/assistant/save/',
+            data=json.dumps({
+                'question': 'Why would A always pair with T?',
+                'response': 'Look at the hydrogen-bond geometry and Chargaff ratios.',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['username'], 'lab-learner')
+        self.assertEqual(body['question'], 'Why would A always pair with T?')
+
+        interaction = AssistantInteraction.objects.get(id=body['id'])
+        self.assertEqual(interaction.username, 'lab-learner')
+        self.assertEqual(interaction.progress.user_id, self.user.id)
+        self.assertEqual(interaction.response_type, 'explanation')
+        self.assertEqual(interaction.mode, Lesson.MYSTERY)
+        self.assertEqual(interaction.simulation_year, 1952)
+        self.assertTrue(interaction.historical_safe)
+        self.assertTrue(interaction.spoiler_safe)
+
+    def test_save_assistant_interaction_rejects_unknown_response_type(self):
+        response = self.client.post(
+            '/api/thales/assistant/save/',
+            data=json.dumps({
+                'question': 'question',
+                'response': 'answer',
+                'response_type': 'not-a-real-type',
+            }),
+            content_type='application/json',
+        )
+
+        self.assertEqual(response.status_code, 400)
+        self.assertEqual(AssistantInteraction.objects.count(), 0)
+
+    def test_progress_is_scoped_to_the_authenticated_user(self):
+        response = self.client.get('/api/thales/progress/')
+
+        self.assertEqual(response.status_code, 200)
+        body = response.json()
+        self.assertEqual(body['session_id'], f'user-{self.user.id}')
+        self.assertEqual(body['user_id'], self.user.id)
+        self.assertEqual(body['username'], 'lab-learner')
+
+    def test_progress_cannot_read_another_users_session(self):
+        other = make_thales_user('another-learner')
+        StudentProgress.objects.create(
+            session_id='private-session',
+            user_id=other.id,
+            username=other.username,
+        )
+
+        response = self.client.get('/api/thales/progress/?session_id=private-session')
+
+        self.assertEqual(response.status_code, 403)
+
+
 class ThalesAccessControlTest(TestCase):
     """The lab is a separate access axis from the blog role."""
 
