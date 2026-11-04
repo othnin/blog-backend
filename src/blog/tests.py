@@ -2701,6 +2701,19 @@ class CategoryImageRedirectTests(TestCase):
         r = Client().get('/api/blog/categories/cooking/image/')
         self.assertEqual(r.status_code, 302)
 
+    def test_no_trailing_slash_redirects_directly(self):
+        """No-slash form must not 301 to the slash form.
+
+        Next.js's /api/:path* rewrite rebuilds the destination from path
+        segments and drops the trailing slash. If this view only matched the
+        slash form, Django's APPEND_SLASH would 301 to the slash form, the
+        proxy would strip it again, and the browser would loop forever.
+        """
+        cat = Category.objects.create(name='Cooking', slug='cooking', image_url='category_images/abc.png')
+        r = Client().get(f'/api/blog/categories/{cat.slug}/image')
+        self.assertEqual(r.status_code, 302)
+        self.assertIn('/media/category_images/abc.png', r['Location'])
+
     @override_settings(
         AWS_STORAGE_BUCKET_NAME='test-bucket',
         AWS_S3_ENDPOINT_URL='https://s3.example.com',

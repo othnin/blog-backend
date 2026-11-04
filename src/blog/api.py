@@ -88,11 +88,7 @@ class BlogController:
         category, _ = Category.objects.get_or_create(slug=slug, defaults={'name': name})
         return category
 
-    @http_get(
-        "/categories/{slug}/image/",
-        description="Redirect to a category's image (signed URL for private storage)"
-    )
-    def category_image(self, slug: str, request):
+    def _category_image_redirect(self, slug: str, request):
         """
         302-redirect to the category image.
 
@@ -113,6 +109,28 @@ class BlogController:
         response = HttpResponseRedirect(url)
         response['Cache-Control'] = 'no-store'
         return response
+
+    @http_get(
+        "/categories/{slug}/image/",
+        description="Redirect to a category's image (signed URL for private storage)"
+    )
+    def category_image(self, slug: str, request):
+        """Slash form — used by direct backend consumers and older clients."""
+        return self._category_image_redirect(slug, request)
+
+    # Both spellings are registered for the same reason as /api/health in
+    # home/urls.py: Next.js's /api/:path* rewrite rebuilds the destination from
+    # path segments and drops the trailing slash. If only the slash form
+    # existed, Django's APPEND_SLASH would 301 back to the slash form, the proxy
+    # would strip it again, and the browser would loop forever
+    # (ERR_TOO_MANY_REDIRECTS).
+    @http_get(
+        "/categories/{slug}/image",
+        description="Redirect to a category's image (no-slash alias)"
+    )
+    def category_image_no_slash(self, slug: str, request):
+        """No-slash form — what the Next.js /api proxy actually forwards."""
+        return self._category_image_redirect(slug, request)
 
     # ============= Tag Endpoints =============
 
