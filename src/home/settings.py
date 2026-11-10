@@ -10,6 +10,7 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 import datetime
+import json
 import sys
 from pathlib import Path
 from decouple import config
@@ -91,6 +92,7 @@ INSTALLED_APPS = [
     "recipes",
     "locations",
     "thales",
+    "llm_advisor",
 ]
 
 MIDDLEWARE = [
@@ -432,6 +434,41 @@ CSP_FONT_SRC = ("'self'",)
 CSP_CONNECT_SRC = ("'self'",)
 CSP_FRAME_ANCESTORS = ("'none'",)
 
+# LLM advisor bridge (thales lab literature advisor).
+#
+# The advisor queries a local Ollama instance (phi4-mini by default). When
+# Ollama is unreachable the frontend silently falls back to its offline
+# keyword advisor, so these defaults are safe on every host — including
+# Railway, where no Ollama exists until OLLAMA_BASE_URL points at one.
+MAX_Q = 5
+SESSION_TIMEOUT_HOURS = 1
+OLLAMA_BASE_URL = config(
+    "OLLAMA_BASE_URL", cast=str, default="http://localhost:11434"
+)
+
+
+def get_model_config():
+    """Resolve the active Ollama model name.
+
+    Resolution order (first match wins):
+    1. ADVISOR_MODEL environment variable
+    2. llm_advisor/config.json (BASE_DIR / 'llm_advisor' / 'config.json')
+    3. fallback default: 'phi4-mini'
+    """
+    model = config("ADVISOR_MODEL", cast=str, default="")
+    if model:
+        return {'model': model}
+
+    config_path = BASE_DIR / 'llm_advisor' / 'config.json'
+    if config_path.exists():
+        with open(config_path) as f:
+            return json.load(f)
+
+    return {'model': 'phi4-mini'}
+
+
+MODEL_CONFIG = get_model_config()
+
 # Logging — console in dev, console + rotating file in production
 #
 # The file handler must never be able to take the app down. logging.config
@@ -482,6 +519,23 @@ if _file_logging_available:
         'formatter': 'verbose',
     }
 
+# The advisor logs interception diagnostics (answer-guard hits, unreachable
+# Ollama) with session_id/reason_code extras, so it needs its own formatter
+# rather than the generic 'verbose' one. Its file handler follows the same
+# availability gating as the app-wide one above.
+_handlers['debug_llm_console'] = {
+    'class': 'logging.StreamHandler',
+    'formatter': 'debug_llm',
+}
+_debug_llm_handlers = ['debug_llm_console']
+if _file_logging_available:
+    _handlers['debug_llm_file'] = {
+        'class': 'logging.FileHandler',
+        'filename': LOG_DIR / 'debug_llm.log',
+        'formatter': 'debug_llm',
+    }
+    _debug_llm_handlers.append('debug_llm_file')
+
 LOGGING = {
     'version': 1,
     'disable_existing_loggers': False,
@@ -489,6 +543,10 @@ LOGGING = {
         'verbose': {
             'format': '{levelname} {asctime} {module} {message}',
             'style': '{',
+        },
+        'debug_llm': {
+            'format': '%(asctime)s [%(session_id)s] %(reason_code)s %(message)s',
+            'datefmt': '%Y-%m-%d %H:%M:%S',
         },
     },
     'handlers': _handlers,
@@ -502,5 +560,11 @@ LOGGING = {
         'recipes': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'auth_app': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'thales': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
+        'llm_advisor': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
+        'llm_advisor.debug': {
+            'handlers': _debug_llm_handlers,
+            'level': 'DEBUG',
+            'propagate': False,
+        },
     },
 }

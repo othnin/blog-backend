@@ -24,6 +24,8 @@ sentry-sdk>=2.18.0,<3.0.0
 # Thales DNA lab: molecular geometry and SDF generation.
 numpy>=2.0.0,<3.0.0
 rdkit>=2024.3.1,<2027.0.0
+# Thales DNA lab: literature advisor bridge calls a local Ollama instance.
+requests>=2.31.0,<3.0.0
 # WSGI server. Pinned here, not installed ad hoc in the Dockerfile, so the
 # image is reproducible and scanners can see it.
 gunicorn>=26.2.0,<27.0.0
