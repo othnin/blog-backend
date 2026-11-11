@@ -7,17 +7,21 @@ wiring -- no backend code changes are involved in either case.
 
 What this app does:
 
-- runs Ollama with phi4-mini on a T4 GPU, keeping the model weights on a
-  Modal Volume (downloaded once, not per deploy),
+- runs Ollama with phi4-mini on an L4 GPU (a T4 pool is the fallback),
+  keeping the model weights on a Modal Volume (downloaded once, not per
+  deploy),
 - exposes Ollama's HTTP API behind a token-gated reverse proxy: only
   requests whose path starts with /<ADVISOR_TOKEN>/ reach the model, and
   everything else gets an ordinary 404. Ollama itself has no authentication
   anywhere, so the token is the only thing between the public URL and
   strangers spending GPU time on it,
-- scales to zero: five minutes after the last request the container sleeps
-  and stops billing. The first request after a quiet stretch pays a cold
-  start (container boot + weights into VRAM, roughly 20-30 s); requests
-  during an active session are warm and fast.
+- scales to zero: fifteen minutes after the last request the container
+  sleeps and stops billing. The first request after a quiet stretch pays
+  a cold start (container boot + weights into VRAM + a warmup generation
+  that absorbs one-time GPU costs -- roughly 150 s all told, which can
+  outlast both the advisor's 90 s timeout and Modal's edge limit, so that
+  one question degrades to the offline advisor and the retry lands on a
+  warm brain); questions during an active session answer in 1-3 s.
 
 One-time setup and deploys are documented in advisor_modal/README.md.
 """
@@ -67,7 +71,11 @@ def _start_ollama(timeout: int = 180) -> None:
         try:
             httpx.get(f"http://127.0.0.1:{OLLAMA_PORT}/api/version", timeout=5)
             return
-        except httpx.ConnectError:
+        except httpx.TransportError:
+            # Not up yet. Ollama binds its port before it is ready to
+            # answer (GPU discovery happens first), so a probe that
+            # connects and then times out still means "starting" -- the
+            # whole TransportError family counts as "keep waiting".
             time.sleep(1)
     raise RuntimeError("ollama serve did not come up")
 
@@ -84,14 +92,38 @@ def _ensure_model() -> None:
         subprocess.run(["ollama", "pull", MODEL], check=True)
         volume.commit()
 
-    # An empty prompt is accepted by /api/generate and forces the weights
-    # into VRAM, so the first real request pays only generation time. The
-    # OLLAMA_KEEP_ALIVE=-1 env var keeps them resident afterwards.
-    httpx.post(
-        f"http://127.0.0.1:{OLLAMA_PORT}/api/generate",
-        json={"model": MODEL, "prompt": "", "keep_alive": -1},
-        timeout=300,
-    )
+    # Warm the brain before serving. Loading the weights alone (an empty
+    # prompt) is not enough: measured on an L4, the first real compute
+    # after a bare load pays ~55 s of one-time costs (kernel setup,
+    # CUDA-graph capture, GPU clock ramp) and the next requests still pay
+    # ~11 s each. One real generation with a medium prompt absorbs those,
+    # so the first learner question after a cold start is fast. The
+    # OLLAMA_KEEP_ALIVE=-1 env var keeps the weights resident afterwards.
+    # Warmup failure is non-fatal: the app still comes up, and the first
+    # request would then pay these costs instead -- slow but correct.
+    try:
+        warmup = httpx.post(
+            f"http://127.0.0.1:{OLLAMA_PORT}/api/generate",
+            json={
+                "model": MODEL,
+                "prompt": (
+                    "You are a helpful assistant in a research laboratory. "
+                    "Write one short paragraph summarizing why careful "
+                    "laboratory notebooks matter, mentioning dated entries, "
+                    "repeated measurements, and honest records of failures. "
+                    "Keep it under sixty words and then stop."
+                ),
+                "stream": False,
+                "keep_alive": -1,
+                "options": {"num_predict": 64},
+            },
+            timeout=300,
+        )
+        warmup.raise_for_status()
+        seconds = warmup.json().get("total_duration", 0) / 1e9
+        print(f"advisor: warmup generation took {seconds:.1f}s", flush=True)
+    except (httpx.HTTPError, ValueError) as exc:
+        print(f"advisor: warmup skipped ({exc!r})", flush=True)
 
 
 @app.function(volumes={"/models": volume})
@@ -111,8 +143,14 @@ def pull_model(model_name: str = MODEL) -> None:
 
 
 @app.function(
-    gpu="T4",  # 16 GB VRAM; phi4-mini's ~2.5 GB q4 fits with room to spare
-    scaledown_window=300,  # sleep (and stop billing) 5 min after the last request
+    # L4 preferred (24 GB VRAM, plentiful capacity); T4 as a fallback pool.
+    # A single GPU type is fine too, but the list keeps one scarce pool from
+    # queueing learner questions behind "acquiring capacity" messages.
+    gpu=["L4", "T4"],
+    # Sleep (and stop billing) 15 min after the last request. Long enough
+    # that a learner pondering between questions keeps the warm brain;
+    # each wake-up costs at most ~$0.20 of idle L4 time.
+    scaledown_window=900,
     volumes={"/models": volume},
     secrets=[modal.Secret.from_name("thales-advisor-token")],
 )
@@ -125,7 +163,9 @@ def advisor():
     from fastapi.responses import Response
 
     _start_ollama()
+    print("advisor: ollama is up", flush=True)
     _ensure_model()
+    print("advisor: model warm, serving", flush=True)
 
     token = os.environ["ADVISOR_TOKEN"]
 
