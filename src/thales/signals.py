@@ -14,11 +14,14 @@ from django.contrib.contenttypes.models import ContentType
 from django.db.models.signals import post_migrate
 from django.dispatch import receiver
 
-from auth_app.permissions import (
-    THALES_GROUP,
-    THALES_PERMISSION_CODENAME,
-    THALES_PERMISSION_NAME,
-)
+# Thales-domain constants. The permission attaches to thales.Lesson, so the
+# app owns the definition. The blog's policy layer (auth_app/permissions.py)
+# keeps its own matching literals — they are two stable strings, and keeping
+# them duplicated means this app imports nothing from its host. See
+# docs/THALES_INTEGRATION.md.
+THALES_GROUP = "Thales"
+THALES_PERMISSION_CODENAME = "access_thales"
+THALES_PERMISSION_NAME = "Can access the Thales lab"
 
 
 @receiver(post_migrate)

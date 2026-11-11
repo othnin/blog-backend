@@ -1,4 +1,7 @@
+from django.conf import settings
 from django.contrib.auth.models import User
+from django.http import HttpResponseForbidden
+from django.shortcuts import redirect
 from ninja.errors import HttpError
 from ninja_jwt.authentication import JWTAuth
 from ninja_jwt.exceptions import AuthenticationFailed
@@ -115,6 +118,31 @@ class ThalesAccessJWTAuth(SuspendAwareJWTAuth):
         if user and not has_thales_access(user):
             raise HttpError(403, "Thales access required")
         return user
+
+
+def thales_page_gate(request):
+    """The blog's injected THALES_PAGE_GATE: guard for the Thales SPA index.
+
+    Resolves the user from the blog's HttpOnly JWT cookies, sends
+    unauthenticated visitors to the site's login page with a return path so
+    they land back in the lab, and 403s logged-in users without the Thales
+    permission. Returns None when the lab may be served; any other return
+    value is the response to send instead.
+
+    The lab app itself never imports this — home/settings.py points
+    settings.THALES_PAGE_GATE here, and thales/access.py resolves it.
+    """
+    user = user_from_session_cookies(request)
+    if user is None:
+        login_url = f"{settings.FRONTEND_URL.rstrip('/')}/login?next=/thales/"
+        return redirect(login_url)
+
+    if not has_thales_access(user):
+        return HttpResponseForbidden(
+            "Your account does not have access to the Thales lab."
+        )
+
+    return None
 
 
 def allow_annon(request):

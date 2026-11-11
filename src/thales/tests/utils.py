@@ -3,7 +3,10 @@
 from django.contrib.auth.models import Group, User
 from ninja_jwt.tokens import RefreshToken
 
-from auth_app.permissions import THALES_GROUP, THALES_PERMISSION_CODENAME
+# Same literals as thales/signals.py and auth_app/permissions.py; inlined so
+# even the lab's test suite imports nothing from the blog apps.
+THALES_GROUP = "Thales"
+THALES_PERMISSION_CODENAME = "access_thales"
 
 TEST_PASSWORD = "ValidPass123"
 

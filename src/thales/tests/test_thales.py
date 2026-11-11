@@ -11,7 +11,7 @@ from thales.tests.utils import (
     thales_group_has_permission,
 )
 from thales.spa import ASSETS_DIR
-from auth_app.permissions import THALES_PERMISSION_CODENAME, THALES_PERMISSION_NAME
+from thales.signals import THALES_PERMISSION_CODENAME, THALES_PERMISSION_NAME
 import json
 
 

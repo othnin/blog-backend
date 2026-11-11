@@ -2,7 +2,7 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 from ninja import Router
 from ninja.errors import HttpError
-from helpers.api_auth import ThalesAccessJWTAuth
+from thales.access import get_api_auth
 from thales.models import (
     AssistantInteraction,
     HypothesisNote,
@@ -13,7 +13,7 @@ from thales.models import (
 from thales.molecular_data import get_all_bases
 from thales.validation import MolecularValidator
 
-router = Router(auth=[ThalesAccessJWTAuth()])
+router = Router(auth=[get_api_auth()])
 
 
 class ValidateBaseRequest(BaseModel):

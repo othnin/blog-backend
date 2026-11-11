@@ -1,11 +1,13 @@
 import json
-import os
+from pathlib import Path
+
+# The lab's own data ships inside the app, so the app is self-contained.
+DATA_PATH = Path(__file__).resolve().parent / 'data' / 'molecular_structures.json'
 
 
 def load_molecular_data():
     """Load molecular structures from JSON."""
-    path = os.path.join(os.path.dirname(__file__), '../data/molecular_structures.json')
-    with open(path, 'r') as f:
+    with open(DATA_PATH, 'r') as f:
         return json.load(f)
 
 

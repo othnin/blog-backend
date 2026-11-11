@@ -10,7 +10,6 @@ For the full list of settings and their values, see
 https://docs.djangoproject.com/en/5.0/ref/settings/
 """
 import datetime
-import json
 import sys
 from pathlib import Path
 from decouple import config
@@ -92,7 +91,6 @@ INSTALLED_APPS = [
     "recipes",
     "locations",
     "thales",
-    "llm_advisor",
 ]
 
 MIDDLEWARE = [
@@ -434,40 +432,14 @@ CSP_FONT_SRC = ("'self'",)
 CSP_CONNECT_SRC = ("'self'",)
 CSP_FRAME_ANCESTORS = ("'none'",)
 
-# LLM advisor bridge (thales lab literature advisor).
-#
-# The advisor queries a local Ollama instance (phi4-mini by default). When
-# Ollama is unreachable the frontend silently falls back to its offline
-# keyword advisor, so these defaults are safe on every host — including
-# Railway, where no Ollama exists until OLLAMA_BASE_URL points at one.
-MAX_Q = 5
-SESSION_TIMEOUT_HOURS = 1
-OLLAMA_BASE_URL = config(
-    "OLLAMA_BASE_URL", cast=str, default="http://localhost:11434"
-)
-
-
-def get_model_config():
-    """Resolve the active Ollama model name.
-
-    Resolution order (first match wins):
-    1. ADVISOR_MODEL environment variable
-    2. llm_advisor/config.json (BASE_DIR / 'llm_advisor' / 'config.json')
-    3. fallback default: 'phi4-mini'
-    """
-    model = config("ADVISOR_MODEL", cast=str, default="")
-    if model:
-        return {'model': model}
-
-    config_path = BASE_DIR / 'llm_advisor' / 'config.json'
-    if config_path.exists():
-        with open(config_path) as f:
-            return json.load(f)
-
-    return {'model': 'phi4-mini'}
-
-
-MODEL_CONFIG = get_model_config()
+# Thales injection seams — see docs/THALES_INTEGRATION.md, "Portability
+# seams". The lab app (src/thales/) resolves both through thales/access.py
+# and imports nothing from this project; these two dotted paths are how the
+# blog injects its own policy (JWT cookies plus the Thales group check). A
+# Django project that omits them gets the portable defaults defined inside
+# the app instead.
+THALES_API_AUTH = "helpers.api_auth.ThalesAccessJWTAuth"
+THALES_PAGE_GATE = "helpers.api_auth.thales_page_gate"
 
 # Logging — console in dev, console + rotating file in production
 #
@@ -560,8 +532,7 @@ LOGGING = {
         'recipes': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'auth_app': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'thales': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
-        'llm_advisor': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
-        'llm_advisor.debug': {
+        'thales.advisor.debug': {
             'handlers': _debug_llm_handlers,
             'level': 'DEBUG',
             'propagate': False,

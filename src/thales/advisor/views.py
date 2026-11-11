@@ -7,8 +7,9 @@ MAX_Q session limits.
 
 Ported from thales2/llm_advisor/views.py (originally thales_old/server/
 api/views.py), with in-memory session storage replaced by the AdvisorSession
-model. Mounted under /api/thales/advisor/ behind the Thales access auth, so
-only lab users can spend questions against the model.
+model. Lives as a subpackage of the thales app (like molecules/), mounted
+under /api/thales/advisor/ behind the lab's injected access auth, so only
+lab users can spend questions against the model.
 """
 
 import re
@@ -19,17 +20,17 @@ from datetime import timedelta
 from typing import Optional
 from pydantic import BaseModel
 from django.utils import timezone
-from django.conf import settings
 from ninja import Router
 from ninja.errors import HttpError
 
-from helpers.api_auth import ThalesAccessJWTAuth
-from .models import AdvisorSession
+from thales.access import get_api_auth
+from thales.models import AdvisorSession
+from . import config
 
 logger = logging.getLogger(__name__)
-debug_llm = logging.getLogger('llm_advisor.debug')
+debug_llm = logging.getLogger('thales.advisor.debug')
 
-router = Router(auth=[ThalesAccessJWTAuth()])
+router = Router(auth=[get_api_auth()])
 
 # Request/Response models
 class ChatRequest(BaseModel):
@@ -99,7 +100,7 @@ ANSWER_GUARD_FALLBACK = "That's not something anyone here can hand you outright 
 
 def cleanup_old_sessions():
     """Remove sessions older than SESSION_TIMEOUT_HOURS."""
-    cutoff = timezone.now() - timedelta(hours=settings.SESSION_TIMEOUT_HOURS)
+    cutoff = timezone.now() - timedelta(hours=config.SESSION_TIMEOUT_HOURS)
     deleted, _ = AdvisorSession.objects.filter(created_at__lt=cutoff).delete()
     if deleted:
         logger.info(f"Cleaned up {deleted} expired session(s)")
@@ -132,7 +133,7 @@ def query_ollama(model, question):
             'temperature': 0.7,
         }
         response = requests.post(
-            f"{settings.OLLAMA_BASE_URL}/api/generate",
+            f"{config.OLLAMA_BASE_URL}/api/generate",
             json=payload,
             timeout=60
         )
@@ -186,17 +187,17 @@ def chat(request, payload: ChatRequest):
 
     session, _ = AdvisorSession.objects.get_or_create(session_id=session_id)
 
-    if session.question_count >= settings.MAX_Q:
+    if session.question_count >= config.MAX_Q:
         raise HttpError(429, 'question_limit_reached')
 
     session.question_count += 1
     session.save(update_fields=['question_count'])
-    questions_remaining = settings.MAX_Q - session.question_count
+    questions_remaining = config.MAX_Q - session.question_count
 
-    model = settings.MODEL_CONFIG.get('model', 'phi4-mini')
+    model = config.MODEL_CONFIG.get('model', 'phi4-mini')
 
     logger.info(
-        f"[{session_id}] Question {session.question_count}/{settings.MAX_Q}: "
+        f"[{session_id}] Question {session.question_count}/{config.MAX_Q}: "
         f"{question[:60]}..."
     )
 
@@ -251,5 +252,5 @@ def reset_session(request, payload: ResetRequest):
 
     return {
         'session_id': new_session_id,
-        'questions_remaining': settings.MAX_Q,
+        'questions_remaining': config.MAX_Q,
     }

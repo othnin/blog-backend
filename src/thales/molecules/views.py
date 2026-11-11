@@ -1,19 +1,20 @@
 """API endpoints for molecular structures and base-pair generation."""
 
-import os
 import json
+from pathlib import Path
+
 import numpy as np
 from typing import Dict
 from ninja import Router
 from ninja.errors import HttpError
 
-from helpers.api_auth import ThalesAccessJWTAuth
+from thales.access import get_api_auth
 from .schemas import MoleculeDefinition, BasePairRequest, BasePairResponse
 from .rdkit_validator import RDKitValidator
 from .geometry_engine import GeometryEngine
 from .templates import CanonicalATPair, CanonicalGCPair
 
-router = Router(auth=[ThalesAccessJWTAuth()])
+router = Router(auth=[get_api_auth()])
 MOLECULES: Dict[str, MoleculeDefinition] = {}
 
 
@@ -57,13 +58,14 @@ def load_molecules():
     """Load molecular definitions from JSON file at module import time."""
     global MOLECULES
 
-    # Construct path to molecular_structures.json
-    json_path = os.path.join(
-        os.path.dirname(__file__),
-        "../../data/molecular_structures.json"
+    # Construct path to molecular_structures.json inside the app
+    json_path = (
+        Path(__file__).resolve().parent.parent
+        / "data"
+        / "molecular_structures.json"
     )
 
-    if not os.path.exists(json_path):
+    if not json_path.exists():
         raise FileNotFoundError(f"Molecular structures JSON not found at {json_path}")
 
     with open(json_path, "r") as f:

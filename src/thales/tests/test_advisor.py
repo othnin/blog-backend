@@ -3,6 +3,7 @@
 Ported from thales2/llm_advisor/tests.py, with the URLs moved under
 /api/thales/advisor/ and every request authenticated through the lab's
 access control (the thales2 original mounted the advisor unauthenticated).
+Lives at thales/tests/ like the rest of the lab's tests.
 
 Ollama is always mocked: the tests must pass on machines without a model
 runtime, and chat behaviour does not depend on the model's output beyond
@@ -64,7 +65,7 @@ class AdvisorViewsTests(TestCase):
         self.assertEqual(response.status_code, 200)
         self.assertEqual(response.json(), {'status': 'ok'})
 
-    @patch('llm_advisor.views.requests.post')
+    @patch('thales.advisor.views.requests.post')
     def test_chat_happy_path(self, mock_post):
         _mock_ollama_response(mock_post)
         response = self._chat({'question': 'What does Chargaff say about ratios?'})
@@ -76,7 +77,7 @@ class AdvisorViewsTests(TestCase):
         # The reply text from the mocked Ollama call passes through unchanged.
         self.assertEqual(data['reply'], 'Here is what the data shows.')
 
-    @patch('llm_advisor.views.requests.post')
+    @patch('thales.advisor.views.requests.post')
     def test_chat_queries_ollama_with_configured_model(self, mock_post):
         _mock_ollama_response(mock_post)
         self._chat({'question': 'What did Avery show?'})
@@ -92,7 +93,7 @@ class AdvisorViewsTests(TestCase):
         response = self._chat({'question': '   '})
         self.assertEqual(response.status_code, 400)
 
-    @patch('llm_advisor.views.requests.post')
+    @patch('thales.advisor.views.requests.post')
     def test_chat_limit_reached_returns_429(self, mock_post):
         _mock_ollama_response(mock_post)
         session_id = 'test-session-limit'
@@ -101,13 +102,13 @@ class AdvisorViewsTests(TestCase):
         response = self._chat({'question': 'one more', 'session_id': session_id})
         self.assertEqual(response.status_code, 429)
 
-    @patch('llm_advisor.views.requests.post')
+    @patch('thales.advisor.views.requests.post')
     def test_chat_ollama_down_returns_503(self, mock_post):
         mock_post.side_effect = requests.exceptions.ConnectionError('connection refused')
         response = self._chat({'question': 'anything at all'})
         self.assertEqual(response.status_code, 503)
 
-    @patch('llm_advisor.views.requests.post')
+    @patch('thales.advisor.views.requests.post')
     def test_answer_guard_filters_spoiler_replies(self, mock_post):
         _mock_ollama_response(mock_post, text='The DNA is a double helix, plainly.')
         response = self._chat({'question': 'What is the structure of DNA?'})

@@ -1,14 +1,14 @@
 """Router for the Thales app, mounted at /api/thales/.
 
-The molecules and llm_advisor routers are nested under this one so that the
+The molecules and advisor routers are nested under this one so that the
 whole Thales feature lives behind a single URL prefix and a single
 add_router() call in home/api.py. That is the entire coupling surface between
 Thales and the rest of the backend: see docs/THALES_INTEGRATION.md.
 """
 
 from . import views
+from .advisor.urls import router as advisor_router
 from .molecules.urls import router as molecules_router
-from llm_advisor.urls import router as advisor_router
 
 # Export the router to be included in the main API
 router = views.router
