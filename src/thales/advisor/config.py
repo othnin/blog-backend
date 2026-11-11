@@ -45,6 +45,16 @@ OLLAMA_TIMEOUT = getattr(
     config("OLLAMA_TIMEOUT", cast=int, default=60),
 )
 
+# Seconds the deep health probe waits for the runtime before reporting it
+# offline. A sleeping serverless runtime is woken by the probe itself, so the
+# first probe can report offline while the container starts; a second probe a
+# couple of minutes later reports online.
+OLLAMA_PROBE_TIMEOUT = getattr(
+    settings,
+    "THALES_ADVISOR_OLLAMA_PROBE_TIMEOUT",
+    config("OLLAMA_PROBE_TIMEOUT", cast=int, default=10),
+)
+
 
 def get_model_config():
     """Resolve the active Ollama model name.

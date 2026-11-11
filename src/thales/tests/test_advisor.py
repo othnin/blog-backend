@@ -16,7 +16,7 @@ from unittest.mock import patch, Mock
 import requests
 from django.test import TestCase, Client
 
-from thales.advisor.config import OLLAMA_TIMEOUT
+from thales.advisor.config import OLLAMA_PROBE_TIMEOUT, OLLAMA_TIMEOUT
 from thales.tests.utils import authenticate, make_thales_user
 
 CHAT_URL = '/api/thales/advisor/chat/'
@@ -64,7 +64,33 @@ class AdvisorViewsTests(TestCase):
     def test_health(self):
         response = self.client.get(HEALTH_URL)
         self.assertEqual(response.status_code, 200)
-        self.assertEqual(response.json(), {'status': 'ok'})
+        # Passive health: it never probes the model runtime, so the desk can
+        # call it on every mount without waking a sleeping brain.
+        self.assertEqual(response.json(), {'status': 'ok', 'brain': 'unknown'})
+
+    @patch('thales.advisor.views.requests.get')
+    def test_deep_health_reports_online_brain(self, mock_get):
+        mock_response = Mock()
+        mock_response.raise_for_status = lambda: None
+        mock_get.return_value = mock_response
+
+        response = self.client.get(HEALTH_URL, {'deep': '1'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'status': 'ok', 'brain': 'online'})
+        mock_get.assert_called_once_with(
+            'http://localhost:11434/api/version',
+            timeout=OLLAMA_PROBE_TIMEOUT,
+        )
+
+    @patch('thales.advisor.views.requests.get')
+    def test_deep_health_reports_offline_brain(self, mock_get):
+        mock_get.side_effect = requests.exceptions.ConnectionError('no brain')
+
+        response = self.client.get(HEALTH_URL, {'deep': '1'})
+
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json(), {'status': 'ok', 'brain': 'offline'})
 
     @patch('thales.advisor.views.requests.post')
     def test_chat_happy_path(self, mock_post):
@@ -89,6 +115,10 @@ class AdvisorViewsTests(TestCase):
         self.assertEqual(payload['model'], 'phi4-mini')
         self.assertEqual(payload['prompt'], 'What did Avery show?')
         self.assertEqual(payload['stream'], False)
+        # Generation parameters belong under 'options'; Ollama ignores a
+        # top-level 'temperature'.
+        self.assertEqual(payload['options'], {'temperature': 0.7})
+        self.assertNotIn('temperature', payload)
         # The request timeout comes from the advisor's own config, not a
         # hardcoded value (THALES_ADVISOR_OLLAMA_TIMEOUT setting ->
         # OLLAMA_TIMEOUT env -> 60s default).

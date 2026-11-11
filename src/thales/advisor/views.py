@@ -52,6 +52,8 @@ class ResetResponse(BaseModel):
 
 class HealthResponse(BaseModel):
     status: str
+    # 'online'/'offline' after a deep probe; 'unknown' on the passive check.
+    brain: str = 'unknown'
 
 ANSWER_GUARD_REGEX = r"(double helix|two strands|two chains|antiparallel|base pair geometry|hydrogen bond.*(specific|pair)|final structure|the answer|what is the structure|solve(d)? the structure|what does dna look like|spiral structure|strands wound|two helical|helical.*pair|paired.*helix)"
 
@@ -130,7 +132,9 @@ def query_ollama(model, question):
             'prompt': question,
             'system': SYSTEM_PROMPT,
             'stream': False,
-            'temperature': 0.7,
+            # Ollama only honours generation parameters under 'options';
+            # a top-level 'temperature' is silently ignored.
+            'options': {'temperature': 0.7},
         }
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
@@ -145,10 +149,42 @@ def query_ollama(model, question):
         return None
 
 
+def probe_brain():
+    """Return True if the configured model runtime answers a cheap request."""
+    try:
+        response = requests.get(
+            f"{config.OLLAMA_BASE_URL}/api/version",
+            timeout=config.OLLAMA_PROBE_TIMEOUT,
+        )
+        response.raise_for_status()
+        return True
+    except requests.exceptions.RequestException as e:
+        logger.warning(f"Brain probe failed: {e}")
+        return False
+
+
 @router.get('/health/', response=HealthResponse)
-def health(request):
-    """Health check endpoint for client availability detection."""
-    return {'status': 'ok'}
+def health(request, deep: bool = False):
+    """Health check endpoint for client availability detection.
+
+    The plain check is passive: it only proves the Django app is reachable, so
+    the desk can probe it on every mount without waking the model runtime.
+
+    ``?deep=1`` additionally probes the runtime (GET /api/version) and reports
+    ``brain: online|offline``. Probing a sleeping serverless runtime wakes it:
+    the first probe may time out while the container starts, and a second call
+    a couple of minutes later reports online.
+    """
+    if not deep:
+        return {'status': 'ok', 'brain': 'unknown'}
+
+    online = probe_brain()
+    if not online:
+        debug_llm.debug(
+            'deep health probe failed',
+            extra={'session_id': 'health', 'reason_code': 'OLLAMA_UNREACHABLE'},
+        )
+    return {'status': 'ok', 'brain': 'online' if online else 'offline'}
 
 
 @router.post('/chat/', response=ChatResponse)
