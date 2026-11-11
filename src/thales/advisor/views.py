@@ -1,7 +1,7 @@
 """
 Views for the genetics lab literature advisor API.
 
-Connects the lab to a local Ollama instance, with period-correctness
+Connects the lab to an Ollama model runtime, with period-correctness
 enforcement (pre-April 1953 knowledge only), ANSWER_GUARD filtering, and
 MAX_Q session limits.
 
@@ -135,7 +135,7 @@ def query_ollama(model, question):
         response = requests.post(
             f"{config.OLLAMA_BASE_URL}/api/generate",
             json=payload,
-            timeout=60
+            timeout=config.OLLAMA_TIMEOUT
         )
         response.raise_for_status()
         result = response.json()
@@ -170,7 +170,8 @@ def chat(request, payload: ChatRequest):
             "answer_guard_fired": bool
         }
 
-    Returns 429 if question limit reached, 503 if Ollama is unreachable.
+    Returns 429 if question limit reached, 503 if Ollama is unreachable
+    (an unreachable Ollama does not consume a question).
     """
     question = payload.question.strip()
 
@@ -190,14 +191,16 @@ def chat(request, payload: ChatRequest):
     if session.question_count >= config.MAX_Q:
         raise HttpError(429, 'question_limit_reached')
 
-    session.question_count += 1
-    session.save(update_fields=['question_count'])
-    questions_remaining = config.MAX_Q - session.question_count
+    # The question is spent only once the model runtime has actually
+    # answered, so a failed query (cold start, outage) never burns one of
+    # the learner's MAX_Q questions.
+    attempt = session.question_count + 1
+    questions_remaining = config.MAX_Q - attempt
 
     model = config.MODEL_CONFIG.get('model', 'phi4-mini')
 
     logger.info(
-        f"[{session_id}] Question {session.question_count}/{config.MAX_Q}: "
+        f"[{session_id}] Question {attempt}/{config.MAX_Q}: "
         f"{question[:60]}..."
     )
 
@@ -212,6 +215,9 @@ def chat(request, payload: ChatRequest):
             503,
             'Ollama server is not responding. Is it running? (ollama serve)'
         )
+
+    session.question_count = attempt
+    session.save(update_fields=['question_count'])
 
     filtered_reply, guard_fired = filter_reply(reply)
 

@@ -35,6 +35,16 @@ OLLAMA_BASE_URL = getattr(
     config("OLLAMA_BASE_URL", cast=str, default="http://localhost:11434"),
 )
 
+# Seconds the advisor waits for the model runtime to answer before giving up
+# (the desk then falls back to its offline advisor). 60 is comfortable for a
+# local Ollama; a serverless runtime can need longer on a cold start, so a
+# deploying host may raise this.
+OLLAMA_TIMEOUT = getattr(
+    settings,
+    "THALES_ADVISOR_OLLAMA_TIMEOUT",
+    config("OLLAMA_TIMEOUT", cast=int, default=60),
+)
+
 
 def get_model_config():
     """Resolve the active Ollama model name.

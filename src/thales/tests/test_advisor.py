@@ -16,6 +16,7 @@ from unittest.mock import patch, Mock
 import requests
 from django.test import TestCase, Client
 
+from thales.advisor.config import OLLAMA_TIMEOUT
 from thales.tests.utils import authenticate, make_thales_user
 
 CHAT_URL = '/api/thales/advisor/chat/'
@@ -88,6 +89,10 @@ class AdvisorViewsTests(TestCase):
         self.assertEqual(payload['model'], 'phi4-mini')
         self.assertEqual(payload['prompt'], 'What did Avery show?')
         self.assertEqual(payload['stream'], False)
+        # The request timeout comes from the advisor's own config, not a
+        # hardcoded value (THALES_ADVISOR_OLLAMA_TIMEOUT setting ->
+        # OLLAMA_TIMEOUT env -> 60s default).
+        self.assertEqual(mock_post.call_args[1]['timeout'], OLLAMA_TIMEOUT)
 
     def test_chat_empty_question_returns_400(self):
         response = self._chat({'question': '   '})
@@ -105,8 +110,16 @@ class AdvisorViewsTests(TestCase):
     @patch('thales.advisor.views.requests.post')
     def test_chat_ollama_down_returns_503(self, mock_post):
         mock_post.side_effect = requests.exceptions.ConnectionError('connection refused')
-        response = self._chat({'question': 'anything at all'})
+        session_id = 'test-session-ollama-down'
+        response = self._chat({'question': 'anything at all', 'session_id': session_id})
         self.assertEqual(response.status_code, 503)
+        # A failed query must not consume the learner's question: once the
+        # runtime recovers, the session still has its full budget left.
+        mock_post.side_effect = None
+        _mock_ollama_response(mock_post)
+        response = self._chat({'question': 'try again', 'session_id': session_id})
+        self.assertEqual(response.status_code, 200)
+        self.assertEqual(response.json()['questions_remaining'], 4)
 
     @patch('thales.advisor.views.requests.post')
     def test_answer_guard_filters_spoiler_replies(self, mock_post):
