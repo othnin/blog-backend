@@ -5,11 +5,44 @@ import time
 from concurrent.futures import ThreadPoolExecutor, as_completed
 from unittest.mock import patch
 
-from django.test import TestCase, override_settings, Client, RequestFactory
+from django.http import HttpResponse, HttpResponsePermanentRedirect
+from django.test import SimpleTestCase, TestCase, override_settings, Client, RequestFactory
 from django.core.cache import cache
 from ninja.errors import HttpError
 
+from helpers.middleware import ApiRedirectNoStoreMiddleware
 from helpers.rate_limit import check_rate_limit, get_client_ip
+
+
+class ApiRedirectNoStoreMiddlewareTests(SimpleTestCase):
+    """API redirects must never enter a browser's permanent redirect cache."""
+
+    def _run(self, path, response):
+        middleware = ApiRedirectNoStoreMiddleware(lambda request: response)
+        return middleware(RequestFactory().get(path))
+
+    def test_api_redirect_is_no_store(self):
+        response = self._run(
+            '/api/thales/hypothesis', HttpResponsePermanentRedirect('/api/thales/hypothesis/')
+        )
+        self.assertEqual(response['Cache-Control'], 'no-store, max-age=0')
+
+    def test_non_api_redirect_is_untouched(self):
+        response = self._run(
+            '/thales', HttpResponsePermanentRedirect('/thales/')
+        )
+        self.assertFalse(response.has_header('Cache-Control'))
+
+    def test_api_success_is_untouched(self):
+        response = self._run('/api/health', HttpResponse('ok'))
+        self.assertFalse(response.has_header('Cache-Control'))
+
+    def test_view_no_store_policy_is_preserved(self):
+        """A view that already set no-store keeps its own header value."""
+        response = HttpResponsePermanentRedirect('/api/blog/categories/x/image/')
+        response['Cache-Control'] = 'no-store'
+        response = self._run('/api/blog/categories/x/image', response)
+        self.assertEqual(response['Cache-Control'], 'no-store')
 
 
 @override_settings(RATE_LIMIT_ENABLED=True)

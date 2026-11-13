@@ -441,3 +441,17 @@ class DatabaseFallbackTests(SimpleTestCase):
             ),
         )
         self.assertIn('OK', proc.stdout, proc.stdout + proc.stderr)
+
+
+class ContentSecurityPolicyTests(SimpleTestCase):
+    """The lab's display fonts must not be blocked by the CSP."""
+
+    def test_google_fonts_hosts_are_allowed(self):
+        response = self.client.get('/api/hello')
+        policy = response['Content-Security-Policy']
+
+        self.assertIn(
+            "style-src 'self' 'unsafe-inline' https://fonts.googleapis.com",
+            policy,
+        )
+        self.assertIn("font-src 'self' https://fonts.gstatic.com", policy)

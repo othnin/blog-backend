@@ -58,7 +58,13 @@ def _serve_index(request, gate):
     if not INDEX_FILE.exists():
         return HttpResponse(NOT_BUILT_MESSAGE, status=503, content_type="text/plain")
 
-    return FileResponse(INDEX_FILE.open("rb"), content_type="text/html")
+    # The shell names the hashed JS/CSS bundle, so a stale copy keeps serving a
+    # stale app even after a deploy. The assets themselves are content-addressed
+    # and safe to cache; the tiny index must always be revalidated. This also
+    # guarantees clients pick up the current bundle on their next visit.
+    response = FileResponse(INDEX_FILE.open("rb"), content_type="text/html")
+    response["Cache-Control"] = "no-store"
+    return response
 
 
 def thales_index(request):

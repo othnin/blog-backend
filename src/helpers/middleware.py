@@ -102,6 +102,36 @@ class GlobalRateLimitMiddleware:
             pass
 
 
+class ApiRedirectNoStoreMiddleware:
+    """Keep API redirects out of the browser's permanent redirect cache.
+
+    Django's APPEND_SLASH answers a slashless /api/ URL with a 301. When a
+    reverse proxy rebuilds the destination from path segments it drops the
+    trailing slash again, so that 301 points at the exact URL the browser just
+    requested. Browsers cache a 301 permanently, which pins the URL into an
+    ``ERR_TOO_MANY_REDIRECTS`` loop even after the proxy is fixed - that is
+    what happened to /api/thales/* before the Next.js middleware learned to
+    preserve the slash.
+
+    API responses are dynamic and must never be permanently cached, so mark
+    every /api/ redirect ``no-store``. A future proxy regression then causes a
+    single failed request instead of a cache that has to be cleared by hand.
+    """
+
+    def __init__(self, get_response):
+        self.get_response = get_response
+
+    def __call__(self, request):
+        response = self.get_response(request)
+        if request.path.startswith("/api/") and response.status_code in (
+            301, 302, 303, 307, 308
+        ):
+            # Respect a view that already chose its own restrictive policy.
+            if "no-store" not in response.get("Cache-Control", "").lower():
+                response["Cache-Control"] = "no-store, max-age=0"
+        return response
+
+
 class SSLRedirectMiddleware:
     """
     Force HTTPS in production, but exempt certain paths (like /api/health/).

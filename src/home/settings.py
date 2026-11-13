@@ -100,6 +100,9 @@ MIDDLEWARE = [
     # never attached to those responses and the browser reports an opaque CORS
     # error instead of the real status code.
     "corsheaders.middleware.CorsMiddleware",
+    # Above SSLRedirectMiddleware and CommonMiddleware so it sees the 3xx they
+    # generate on the way out and can keep browsers from caching it forever.
+    "helpers.middleware.ApiRedirectNoStoreMiddleware",
     "helpers.middleware.SSLRedirectMiddleware",
     "csp.middleware.CSPMiddleware",
     "helpers.middleware.GlobalRateLimitMiddleware",
@@ -424,11 +427,17 @@ RATE_LIMIT_ENABLED = config("RATE_LIMIT_ENABLED", cast=bool, default=not DEBUG)
 NUM_TRUSTED_PROXIES = config("NUM_TRUSTED_PROXIES", cast=int, default=1)
 
 # Content Security Policy
+#
+# The Thales lab index (thales-frontend/index.html) loads its two display fonts
+# from Google Fonts. Without these two hosts the stylesheet is blocked by
+# style-src (falling back from style-src-elem) and the font files by font-src,
+# so the lab silently drops to fallback typography. Keep these in step with
+# thales-frontend/index.html if the font link changes.
 CSP_DEFAULT_SRC = ("'self'",)
 CSP_SCRIPT_SRC = ("'self'",)
-CSP_STYLE_SRC = ("'self'", "'unsafe-inline'")
+CSP_STYLE_SRC = ("'self'", "'unsafe-inline'", "https://fonts.googleapis.com")
 CSP_IMG_SRC = ("'self'", "data:", "https:")
-CSP_FONT_SRC = ("'self'",)
+CSP_FONT_SRC = ("'self'", "https://fonts.gstatic.com")
 CSP_CONNECT_SRC = ("'self'",)
 CSP_FRAME_ANCESTORS = ("'none'",)
 

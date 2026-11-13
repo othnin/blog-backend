@@ -437,7 +437,12 @@ class ThalesAccessControlTest(TestCase):
         user = make_thales_user('thales-member')
         authenticate(self.client, user)
 
-        self.assertEqual(self.client.get('/thales/').status_code, 200)
+        response = self.client.get('/thales/')
+
+        self.assertEqual(response.status_code, 200)
+        # The shell names the hashed bundle; caching it would keep serving an
+        # old app after a deploy.
+        self.assertEqual(response['Cache-Control'], 'no-store')
 
     def test_page_allows_admin_without_group(self):
         user = make_thales_user('admin-no-group', role='admin', thales=False)
