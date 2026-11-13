@@ -27,6 +27,7 @@ class Lesson(models.Model):
         # here; membership in the Thales group is what actually grants it.
         permissions = [
             ('access_thales', 'Can access the Thales lab'),
+            ('advise_students', 'Can advise Thales students'),
         ]
 
     def __str__(self):
@@ -118,3 +119,46 @@ class HypothesisNote(models.Model):
 
     def __str__(self):
         return f"Hypothesis: user {self.user_id}"
+
+
+class StudentGrade(models.Model):
+    """One advisor-maintained grade per learner.
+
+    Grades never appear in a student-facing response. The model stores plain
+    integer user IDs rather than foreign keys so the lab keeps working if the
+    host site's auth tables are detached (the same rule as StudentProgress,
+    HypothesisNote, and AdvisorFeedback).
+    """
+    student_user_id = models.PositiveIntegerField(unique=True, db_index=True)
+    student_username = models.CharField(max_length=150, blank=True, default='')
+    grade = models.CharField(max_length=32)
+    graded_by_id = models.PositiveIntegerField(null=True, blank=True)
+    graded_by_username = models.CharField(max_length=150, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Grade: user {self.student_user_id} = {self.grade}"
+
+
+class AdvisorFeedback(models.Model):
+    """One entry in a learner's advisor feedback thread.
+
+    Feedback is visible to the target learner and to advisors, but it never
+    carries grade information. Entries are append-only: editing or deleting
+    feedback would make the thread unreliable as a record of what was said.
+    """
+    student_user_id = models.PositiveIntegerField(db_index=True)
+    student_username = models.CharField(max_length=150, blank=True, default='')
+    advisor_id = models.PositiveIntegerField(null=True, blank=True)
+    advisor_username = models.CharField(max_length=150, blank=True, default='')
+    text = models.TextField()
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        ordering = ['-created_at']
+        indexes = [
+            models.Index(fields=['student_user_id', '-created_at']),
+        ]
+
+    def __str__(self):
+        return f"Feedback: user {self.student_user_id} by {self.advisor_username}"

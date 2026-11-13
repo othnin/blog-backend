@@ -23,6 +23,10 @@ THALES_GROUP = "Thales"
 THALES_PERMISSION_CODENAME = "access_thales"
 THALES_PERMISSION_NAME = "Can access the Thales lab"
 
+THALES_ADVISOR_GROUP = "Thales Advisors"
+THALES_ADVISOR_PERMISSION_CODENAME = "advise_students"
+THALES_ADVISOR_PERMISSION_NAME = "Can advise Thales students"
+
 
 @receiver(post_migrate)
 def ensure_thales_group(sender, **kwargs):
@@ -36,5 +40,16 @@ def ensure_thales_group(sender, **kwargs):
         codename=THALES_PERMISSION_CODENAME,
         defaults={"name": THALES_PERMISSION_NAME},
     )
+    advisor_permission, _ = Permission.objects.update_or_create(
+        content_type=content_type,
+        codename=THALES_ADVISOR_PERMISSION_CODENAME,
+        defaults={"name": THALES_ADVISOR_PERMISSION_NAME},
+    )
+
     group, _ = Group.objects.get_or_create(name=THALES_GROUP)
     group.permissions.add(permission)
+
+    # Advisors also use the lab, so the advisor group carries normal Thales
+    # access as well as the advising capability.
+    advisor_group, _ = Group.objects.get_or_create(name=THALES_ADVISOR_GROUP)
+    advisor_group.permissions.add(permission, advisor_permission)

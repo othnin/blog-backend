@@ -2,8 +2,9 @@ from typing import Optional, Dict, Any
 from pydantic import BaseModel, Field
 from ninja import Router
 from ninja.errors import HttpError
-from thales.access import get_api_auth
+from thales.access import get_api_auth, has_advisor_access
 from thales.models import (
+    AdvisorFeedback,
     AssistantInteraction,
     HypothesisNote,
     Lesson,
@@ -47,6 +48,44 @@ class AssistantInteractionRequest(BaseModel):
 
 class HypothesisRequest(BaseModel):
     text: str = Field(..., max_length=20000)
+
+
+@router.get('/me/')
+def get_me(request):
+    """Return the caller's identity and lab capabilities.
+
+    The SPA uses ``is_advisor`` to decide whether to show the dashboard link;
+    the API still enforces advisor access on every advising route.
+    """
+    user = request.auth
+    return {
+        'user_id': user.id,
+        'username': user.get_username(),
+        'is_advisor': has_advisor_access(user),
+    }
+
+
+@router.get('/feedback/')
+def get_my_feedback(request):
+    """Return the caller's advisor feedback thread.
+
+    Deliberately excludes grades: the student-facing surface must never leak
+    the advisor-only grade, even by accident.
+    """
+    entries = AdvisorFeedback.objects.filter(
+        student_user_id=request.auth.id,
+    ).order_by('-created_at')
+    return {
+        'feedback': [
+            {
+                'id': entry.id,
+                'text': entry.text,
+                'advisor_username': entry.advisor_username,
+                'created_at': entry.created_at.isoformat(),
+            }
+            for entry in entries
+        ],
+    }
 
 
 def _user_progress(request, session_id: Optional[str] = None) -> StudentProgress:

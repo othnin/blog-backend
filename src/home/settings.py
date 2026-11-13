@@ -440,6 +440,8 @@ CSP_FRAME_ANCESTORS = ("'none'",)
 # the app instead.
 THALES_API_AUTH = "helpers.api_auth.ThalesAccessJWTAuth"
 THALES_PAGE_GATE = "helpers.api_auth.thales_page_gate"
+THALES_ADVISOR_CHECK = "auth_app.permissions.has_advisor_access"
+THALES_ADVISOR_PAGE_GATE = "helpers.api_auth.thales_advisor_page_gate"
 
 # Logging — console in dev, console + rotating file in production
 #

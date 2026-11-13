@@ -8,7 +8,7 @@ from ninja_jwt.exceptions import AuthenticationFailed
 from ninja_jwt.settings import api_settings
 from ninja_jwt.tokens import AccessToken, RefreshToken
 
-from auth_app.permissions import has_thales_access
+from auth_app.permissions import has_advisor_access, has_thales_access
 
 # The blog stores its JWTs in these HttpOnly cookies. The names are defined in
 # blog-frontend/src/lib/auth.jsx; keep them in step.
@@ -141,6 +141,24 @@ def thales_page_gate(request):
         return HttpResponseForbidden(
             "Your account does not have access to the Thales lab."
         )
+
+    return None
+
+
+def thales_advisor_page_gate(request):
+    """The blog's injected THALES_ADVISOR_PAGE_GATE for /thales/advisor/.
+
+    Advisors are ordinary lab members with an extra capability, so the page
+    requires a valid session and the advisor permission. A member without the
+    capability gets a 403 rather than being silently shown the student lab.
+    """
+    user = user_from_session_cookies(request)
+    if user is None:
+        login_url = f"{settings.FRONTEND_URL.rstrip('/')}/login?next=/thales/advisor/"
+        return redirect(login_url)
+
+    if not has_advisor_access(user):
+        return HttpResponseForbidden("Advisor access required.")
 
     return None
 

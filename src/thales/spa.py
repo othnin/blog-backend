@@ -31,7 +31,7 @@ from pathlib import Path
 
 from django.http import FileResponse, HttpResponse
 
-from thales.access import page_gate
+from thales.access import advisor_page_gate, page_gate
 
 # The built bundle lives inside the app, so it ships with the image and is
 # never collected into STATIC_ROOT.
@@ -50,9 +50,8 @@ NOT_BUILT_MESSAGE = (
 )
 
 
-def thales_index(request):
-    """Serve the built SPA entrypoint to authorized users only."""
-    blocked = page_gate(request)
+def _serve_index(request, gate):
+    blocked = gate(request)
     if blocked is not None:
         return blocked
 
@@ -60,6 +59,21 @@ def thales_index(request):
         return HttpResponse(NOT_BUILT_MESSAGE, status=503, content_type="text/plain")
 
     return FileResponse(INDEX_FILE.open("rb"), content_type="text/html")
+
+
+def thales_index(request):
+    """Serve the built SPA entrypoint to authorized users only."""
+    return _serve_index(request, page_gate)
+
+
+def thales_advisor_index(request):
+    """Serve the same SPA for /thales/advisor/, guarded by advisor access.
+
+    The React app reads the path and renders the advisor dashboard instead of
+    the student lab. Keeping one bundle means the advisor route ships with the
+    lab and cannot drift into a separate deployable.
+    """
+    return _serve_index(request, advisor_page_gate)
 
 
 def thales_asset(request, filename):

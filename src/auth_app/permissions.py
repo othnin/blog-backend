@@ -8,10 +8,15 @@ combination (thales-reader, thales-editor, ...).
 """
 
 THALES_ACCESS_PERMISSION = "thales.access_thales"
+THALES_ADVISOR_PERMISSION = "thales.advise_students"
 
 THALES_GROUP = "Thales"
 THALES_PERMISSION_CODENAME = "access_thales"
 THALES_PERMISSION_NAME = "Can access the Thales lab"
+
+THALES_ADVISOR_GROUP = "Thales Advisors"
+THALES_ADVISOR_PERMISSION_CODENAME = "advise_students"
+THALES_ADVISOR_PERMISSION_NAME = "Can advise Thales students"
 
 
 def is_admin(user):
@@ -29,9 +34,27 @@ def has_thales_access(user):
 
     Access is granted by the ``Thales`` group's permission. Admins bypass the
     group so a lab membership cannot lock an administrator out of the app.
+    Advisors also get the normal lab capability.
     """
     if not user or not getattr(user, "is_authenticated", False):
         return False
     if is_admin(user):
         return True
-    return bool(user.has_perm(THALES_ACCESS_PERMISSION))
+    return bool(
+        user.has_perm(THALES_ACCESS_PERMISSION)
+        or user.has_perm(THALES_ADVISOR_PERMISSION)
+    )
+
+
+def has_advisor_access(user):
+    """Whether ``user`` may inspect students and leave advisor feedback.
+
+    This is a separate capability from ordinary lab access. An advisor is a
+    member of the ``Thales Advisors`` group; admins bypass the group for the
+    same lockout reason as above.
+    """
+    if not user or not getattr(user, "is_authenticated", False):
+        return False
+    if is_admin(user):
+        return True
+    return bool(user.has_perm(THALES_ADVISOR_PERMISSION))

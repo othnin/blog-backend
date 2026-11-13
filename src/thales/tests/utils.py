@@ -8,6 +8,9 @@ from ninja_jwt.tokens import RefreshToken
 THALES_GROUP = "Thales"
 THALES_PERMISSION_CODENAME = "access_thales"
 
+THALES_ADVISOR_GROUP = "Thales Advisors"
+THALES_ADVISOR_PERMISSION_CODENAME = "advise_students"
+
 TEST_PASSWORD = "ValidPass123"
 
 
@@ -16,6 +19,7 @@ def make_thales_user(
     *,
     role="reader",
     thales=True,
+    advisor=False,
     superuser=False,
     suspended=False,
 ):
@@ -34,6 +38,9 @@ def make_thales_user(
 
     if thales:
         group, _ = Group.objects.get_or_create(name=THALES_GROUP)
+        user.groups.add(group)
+    if advisor:
+        group, _ = Group.objects.get_or_create(name=THALES_ADVISOR_GROUP)
         user.groups.add(group)
     return user
 
@@ -54,3 +61,10 @@ def authenticate(client, user):
 def thales_group_has_permission():
     group = Group.objects.get(name=THALES_GROUP)
     return group.permissions.filter(codename=THALES_PERMISSION_CODENAME).exists()
+
+
+def advisor_group_has_permission():
+    group = Group.objects.get(name=THALES_ADVISOR_GROUP)
+    return group.permissions.filter(
+        codename=THALES_ADVISOR_PERMISSION_CODENAME
+    ).exists()
