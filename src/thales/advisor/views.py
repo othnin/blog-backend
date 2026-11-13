@@ -13,8 +13,10 @@ lab users can spend questions against the model.
 """
 
 import re
+import time
 import uuid
 import logging
+import threading
 import requests
 from datetime import timedelta
 from typing import Optional
@@ -54,6 +56,11 @@ class HealthResponse(BaseModel):
     status: str
     # 'online'/'offline' after a deep probe; 'unknown' on the passive check.
     brain: str = 'unknown'
+
+class WarmResponse(BaseModel):
+    # 'warming' when this call started a wake-up; 'skipped' when one was
+    # already running or had finished within the cooldown.
+    status: str
 
 ANSWER_GUARD_REGEX = r"(double helix|two strands|two chains|antiparallel|base pair geometry|hydrogen bond.*(specific|pair)|final structure|the answer|what is the structure|solve(d)? the structure|what does dna look like|spiral structure|strands wound|two helical|helical.*pair|paired.*helix)"
 
@@ -145,7 +152,12 @@ def query_ollama(model, question):
         result = response.json()
         return result.get('response', '').strip()
     except requests.exceptions.RequestException as e:
-        logger.error(f"Ollama query failed: {e}")
+        logger.error(
+            "Ollama query failed at %s (timeout=%ss): %s",
+            config.redact_url(config.OLLAMA_BASE_URL),
+            config.OLLAMA_TIMEOUT,
+            e,
+        )
         return None
 
 
@@ -159,8 +171,87 @@ def probe_brain():
         response.raise_for_status()
         return True
     except requests.exceptions.RequestException as e:
-        logger.warning(f"Brain probe failed: {e}")
+        logger.warning(
+            "Brain probe failed at %s (timeout=%ss): %s",
+            config.redact_url(config.OLLAMA_BASE_URL),
+            config.OLLAMA_PROBE_TIMEOUT,
+            e,
+        )
         return False
+
+
+# Background warm-up state. One warm-up per process is enough: concurrent
+# page loads share the same runtime, and the cooldown stops a burst of mounts
+# from queueing redundant 180 s requests. The lock is only held for the
+# bookkeeping, never across the network call.
+_warm_lock = threading.Lock()
+_warm_in_flight = False
+_warm_last_finished = None
+
+
+def _warm_brain_sync():
+    """Wake the runtime and wait until it can answer. Runs off-request."""
+    global _warm_in_flight, _warm_last_finished
+    try:
+        response = requests.get(
+            f"{config.OLLAMA_BASE_URL}/api/version",
+            timeout=config.OLLAMA_WARM_TIMEOUT,
+        )
+        response.raise_for_status()
+        logger.info(
+            "Advisor brain warm-up finished at %s",
+            config.redact_url(config.OLLAMA_BASE_URL),
+        )
+    except requests.exceptions.RequestException as e:
+        logger.warning(
+            "Advisor brain warm-up failed at %s (timeout=%ss): %s",
+            config.redact_url(config.OLLAMA_BASE_URL),
+            config.OLLAMA_WARM_TIMEOUT,
+            e,
+        )
+    finally:
+        with _warm_lock:
+            _warm_in_flight = False
+            _warm_last_finished = time.monotonic()
+
+
+def start_brain_warm():
+    """Start one background warm-up unless one is running or recent.
+
+    Returns True when this call started a thread, False when it was
+    deduplicated. The thread is a daemon so a worker restart never waits on
+    it; nothing user-facing depends on the result.
+    """
+    global _warm_in_flight
+    with _warm_lock:
+        if _warm_in_flight:
+            return False
+        if (
+            _warm_last_finished is not None
+            and time.monotonic() - _warm_last_finished < config.OLLAMA_WARM_COOLDOWN
+        ):
+            return False
+        _warm_in_flight = True
+    threading.Thread(
+        target=_warm_brain_sync,
+        name='thales-advisor-warm',
+        daemon=True,
+    ).start()
+    return True
+
+
+@router.post('/warm/', response={202: WarmResponse})
+def warm(request):
+    """Wake the model runtime before a question needs it.
+
+    The desk calls this when it mounts. A cold Modal brain needs roughly
+    150 s (container boot + warmup), which is longer than any question can
+    wait, so by starting the wake-up while the learner is still reading the
+    page the first question usually lands on a warm runtime. Returns
+    immediately; the request never waits for the brain.
+    """
+    started = start_brain_warm()
+    return 202, {'status': 'warming' if started else 'skipped'}
 
 
 @router.get('/health/', response=HealthResponse)
@@ -244,7 +335,8 @@ def chat(request, payload: ChatRequest):
 
     if reply is None:
         debug_llm.debug(
-            f'question="{question[:100]}..."',
+            f'question="{question[:100]}..." '
+            f'brain={config.redact_url(config.OLLAMA_BASE_URL)}',
             extra={'session_id': session_id, 'reason_code': 'OLLAMA_UNREACHABLE'}
         )
         raise HttpError(

@@ -67,15 +67,22 @@ so changing the brain never redeploys the backend.
 - **Warm questions are the norm:** inside a session (or within 15 minutes
   of the last question) the brain answers in **1–3 s** — roughly 600
   tokens/s prompt processing, ~80 tokens/s generation on the L4.
-- **Cold start:** the first question after a quiet stretch wakes the
-  container, which boots, loads the weights, and runs a warmup generation
-  that absorbs the L4's one-time costs (kernel setup, CUDA-graph capture,
-  clock ramp — measured at ~100 s after a bare load). All told this can
-  exceed ~150 s, which outlasts both the advisor's 90 s timeout and
-  Modal's edge limit — so **that one question degrades to the offline
-  advisor** (the question is refunded, nothing burns), and asking again
-  seconds later lands on the fully warm brain. The warmup is what makes
-  the *second* question sub-second instead of another ~55 s.
+- **Cold start is moved off the question:** the desk asks the backend to
+  warm the brain when it mounts (`POST /api/thales/advisor/warm/`), which
+  wakes the container in a background thread and returns immediately. The
+  container boots, loads the weights, and runs the warmup generation that
+  absorbs the L4's one-time costs (kernel setup, CUDA-graph capture, clock
+  ramp — measured at ~100 s after a bare load), ~150 s all told. Doing that
+  while the learner is still reading means the first question normally lands
+  on a warm brain. If a question still arrives mid-wake-up, it degrades to
+  the offline advisor (refunded, nothing burns) and the retry succeeds. The
+  warm-up is deduplicated per process and cooled down for
+  `OLLAMA_WARM_COOLDOWN` seconds, so a burst of page loads wakes one
+  container rather than queueing redundant requests.
+- **Cost of warming:** a page mount that never asks a question still pays
+  one wake-up (~$0.20 of idle-tail ceiling), not a per-question charge. The
+  brain then stays warm for the 15-minute `scaledown_window`, which covers
+  the rest of a lesson.
 - **Failures are graceful by design:** if the brain is unreachable, the
   advisor returns 503 and the desk silently answers from its offline
   keyword advisor; since a failed query does not consume a question, the
@@ -90,6 +97,18 @@ so changing the brain never redeploys the backend.
   `modal app stop thales-advisor` does not merely sleep the container — it
   disables the deployment entirely (the URL then answers
   `invalid function call`); redeploy with `modal deploy` to bring it back.
+- **Check which brain the backend is pointed at:** every backend boot logs
+  `Advisor brain: <url with the token redacted> (timeout=Ns)`. If that says
+  `http://localhost:11434`, `OLLAMA_BASE_URL` is not set on the deploying
+  host, so no question ever reaches Modal — the fix is the variable, not
+  the brain. In production (non-debug) the backend also logs a warning for
+  a loopback URL. A failed query additionally names the target and timeout
+  in the `Ollama query failed at ...` line.
+- **Check whether Modal was even woken:** ask the application one question,
+  then run `modal app logs thales-advisor`. If no container started there,
+  the backend never reached the URL (wrong/stale `OLLAMA_BASE_URL`). If a
+  container did start, the request was a cold start that outlasted
+  `OLLAMA_TIMEOUT`; the next attempt lands on the warm brain.
 
 ## Swapping the model
 

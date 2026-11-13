@@ -11,17 +11,26 @@ the ANSWER_GUARD filter.
 """
 
 import json
+import time
 from unittest.mock import patch, Mock
 
 import requests
-from django.test import TestCase, Client
+from django.test import SimpleTestCase, TestCase, Client
 
-from thales.advisor.config import OLLAMA_PROBE_TIMEOUT, OLLAMA_TIMEOUT
+from thales.advisor import config, views
+from thales.advisor.config import (
+    OLLAMA_PROBE_TIMEOUT,
+    OLLAMA_TIMEOUT,
+    OLLAMA_WARM_TIMEOUT,
+    is_loopback,
+    redact_url,
+)
 from thales.tests.utils import authenticate, make_thales_user
 
 CHAT_URL = '/api/thales/advisor/chat/'
 RESET_URL = '/api/thales/advisor/reset/'
 HEALTH_URL = '/api/thales/advisor/health/'
+WARM_URL = '/api/thales/advisor/warm/'
 
 
 def _mock_ollama_response(mock_post, text='Here is what the data shows.'):
@@ -29,6 +38,26 @@ def _mock_ollama_response(mock_post, text='Here is what the data shows.'):
     mock_response.raise_for_status = lambda: None
     mock_response.json = lambda: {'response': text}
     mock_post.return_value = mock_response
+
+
+class BrainUrlDiagnosticsTests(SimpleTestCase):
+    """The configured brain URL must be loggable without leaking its token."""
+
+    def test_modal_token_is_redacted(self):
+        self.assertEqual(
+            redact_url('https://othnin--thales-advisor.modal.run/51adf8f5/api'),
+            'https://othnin--thales-advisor.modal.run/<redacted>/api',
+        )
+
+    def test_bare_url_is_unchanged(self):
+        self.assertEqual(
+            redact_url('http://localhost:11434'), 'http://localhost:11434'
+        )
+
+    def test_loopback_detection(self):
+        self.assertTrue(is_loopback('http://localhost:11434'))
+        self.assertTrue(is_loopback('http://127.0.0.1:11434'))
+        self.assertFalse(is_loopback('https://example.modal.run/token'))
 
 
 class AdvisorAccessControlTest(TestCase):
@@ -46,6 +75,63 @@ class AdvisorAccessControlTest(TestCase):
         authenticate(self.client, user)
         response = self.client.get(HEALTH_URL)
         self.assertEqual(response.status_code, 403)
+
+
+class BrainWarmTests(TestCase):
+    """Mounting the desk starts one off-request wake-up, never a waiting one."""
+
+    def setUp(self):
+        self.client = Client()
+        self.user = make_thales_user('advisor-warmer')
+        authenticate(self.client, self.user)
+        views._warm_in_flight = False
+        views._warm_last_finished = None
+
+    def tearDown(self):
+        views._warm_in_flight = False
+        views._warm_last_finished = None
+
+    @patch('thales.advisor.views.start_brain_warm', return_value=True)
+    def test_warm_starts_a_background_wakeup(self, mock_start):
+        response = self.client.post(WARM_URL)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {'status': 'warming'})
+        mock_start.assert_called_once_with()
+
+    @patch('thales.advisor.views.start_brain_warm', return_value=False)
+    def test_warm_reports_a_deduplicated_call(self, mock_start):
+        response = self.client.post(WARM_URL)
+        self.assertEqual(response.status_code, 202)
+        self.assertEqual(response.json(), {'status': 'skipped'})
+
+    def test_anonymous_cannot_warm(self):
+        self.assertEqual(Client().post(WARM_URL).status_code, 401)
+
+    @patch('thales.advisor.views.requests.get')
+    def test_warmup_probe_uses_the_long_warm_timeout(self, mock_get):
+        mock_response = Mock()
+        mock_response.raise_for_status = lambda: None
+        mock_get.return_value = mock_response
+
+        views._warm_brain_sync()
+
+        mock_get.assert_called_once_with(
+            f'{config.OLLAMA_BASE_URL}/api/version',
+            timeout=OLLAMA_WARM_TIMEOUT,
+        )
+
+    @patch('thales.advisor.views.threading.Thread')
+    def test_start_brain_warm_dedupes_while_in_flight(self, mock_thread):
+        self.assertTrue(views.start_brain_warm())
+        self.assertFalse(views.start_brain_warm())
+        mock_thread.assert_called_once()
+        self.assertTrue(views._warm_in_flight)
+
+    @patch('thales.advisor.views.threading.Thread')
+    def test_start_brain_warm_respects_cooldown(self, mock_thread):
+        views._warm_last_finished = time.monotonic()
+        self.assertFalse(views.start_brain_warm())
+        mock_thread.assert_not_called()
 
 
 class AdvisorViewsTests(TestCase):

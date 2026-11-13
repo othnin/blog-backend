@@ -11,6 +11,7 @@ default below.
 
 import json
 from pathlib import Path
+from urllib.parse import urlsplit, urlunsplit
 
 from django.conf import settings
 from decouple import config
@@ -54,6 +55,47 @@ OLLAMA_PROBE_TIMEOUT = getattr(
     "THALES_ADVISOR_OLLAMA_PROBE_TIMEOUT",
     config("OLLAMA_PROBE_TIMEOUT", cast=int, default=10),
 )
+
+# Seconds a background warm-up may wait for the runtime to come up. This is
+# deliberately longer than OLLAMA_TIMEOUT: a cold Modal start takes ~150 s,
+# and nothing user-facing waits on this — it only decides when the warm-up
+# thread gives up.
+OLLAMA_WARM_TIMEOUT = getattr(
+    settings,
+    "THALES_ADVISOR_OLLAMA_WARM_TIMEOUT",
+    config("OLLAMA_WARM_TIMEOUT", cast=int, default=180),
+)
+
+# Don't start another background warm-up within this many seconds of the last
+# one finishing. The brain stays warm for its scaledown window (15 min), so a
+# warm-up per page mount would only duplicate work.
+OLLAMA_WARM_COOLDOWN = getattr(
+    settings,
+    "THALES_ADVISOR_OLLAMA_WARM_COOLDOWN",
+    config("OLLAMA_WARM_COOLDOWN", cast=int, default=60),
+)
+
+
+def redact_url(url):
+    """Return ``url`` safe to log, hiding the brain's auth token.
+
+    The Modal brain gates itself with a token in the first path segment
+    (``https://<workspace>--<label>.modal.run/<token>``), so a raw base URL
+    in a log line would leak the only credential protecting GPU time. Bare
+    URLs such as ``http://localhost:11434`` have no path and pass through
+    unchanged.
+    """
+    parts = urlsplit(url)
+    segments = [segment for segment in parts.path.split('/') if segment]
+    if not segments:
+        return url
+    segments[0] = '<redacted>'
+    return urlunsplit((parts.scheme, parts.netloc, '/' + '/'.join(segments), '', ''))
+
+
+def is_loopback(url):
+    """True when ``url`` points at this machine (localhost/127.0.0.1/::1)."""
+    return (urlsplit(url).hostname or '') in ('localhost', '127.0.0.1', '::1')
 
 
 def get_model_config():
