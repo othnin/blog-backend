@@ -2,7 +2,7 @@
 
 `app.py` deploys the lab's literature-advisor model runtime — Ollama with
 **phi4-mini** on an L4 GPU (with T4 as a fallback pool) — as a scale-to-zero
-Modal app. The backend's advisor (`src/thales/advisor/`) calls it through
+Modal app. The backend's advisor (`src/watsoncrick/advisor/`) calls it through
 `OLLAMA_BASE_URL`; that single variable is the whole wiring, on the Django
 side and here.
 
@@ -68,7 +68,7 @@ so changing the brain never redeploys the backend.
   of the last question) the brain answers in **1–3 s** — roughly 600
   tokens/s prompt processing, ~80 tokens/s generation on the L4.
 - **Cold start is moved off the question:** the desk asks the backend to
-  warm the brain when it mounts (`POST /api/thales/advisor/warm/`), which
+  warm the brain when it mounts (`POST /api/watsoncrick/advisor/warm/`), which
   wakes the container in a background thread and returns immediately. The
   container boots, loads the weights, and runs the warmup generation that
   absorbs the L4's one-time costs (kernel setup, CUDA-graph capture, clock
@@ -92,7 +92,7 @@ so changing the brain never redeploys the backend.
   warmup generation took ...s`, `advisor: model warm, serving`), and
   Ollama's own log lines land there too. The backend log signature for an
   unreachable brain is `OLLAMA_UNREACHABLE` plus a 503 on
-  `/api/thales/advisor/chat/` — that means the URL/token is wrong or
+  `/api/watsoncrick/advisor/chat/` — that means the URL/token is wrong or
   Modal is down, not that anything in Django is broken. Note that
   `modal app stop thales-advisor` does not merely sleep the container — it
   disables the deployment entirely (the URL then answers
@@ -119,7 +119,7 @@ modal run advisor_modal/app.py::pull_model --model-name <model>
 ```
 
 and set `ADVISOR_MODEL=<model>` on the backend (it overrides
-`src/thales/advisor/config.json`). Match the GPU size to the model — phi4-mini
+`src/watsoncrick/advisor/config.json`). Match the GPU size to the model — phi4-mini
 fits an L4 (or T4) with room to spare.
 
 ## Developing this app

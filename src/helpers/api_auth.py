@@ -8,7 +8,7 @@ from ninja_jwt.exceptions import AuthenticationFailed
 from ninja_jwt.settings import api_settings
 from ninja_jwt.tokens import AccessToken, RefreshToken
 
-from auth_app.permissions import has_advisor_access, has_thales_access
+from auth_app.permissions import has_advisor_access, has_watsoncrick_access
 
 # The blog stores its JWTs in these HttpOnly cookies. The names are defined in
 # blog-frontend/src/lib/auth.jsx; keep them in step.
@@ -71,7 +71,7 @@ def user_from_session_cookies(request):
     The access token is preferred. Falling back to the refresh token lets a
     top-level page load survive the 60-minute access-token lifetime without
     bouncing the user through the login page; API calls still require a live
-    access token and are refreshed by the Thales client's 401 interceptor.
+    access token and are refreshed by the WatsonCrick client's 401 interceptor.
 
     Returns None for anonymous, inactive, deleted, or suspended users.
     """
@@ -96,12 +96,12 @@ def user_from_session_cookies(request):
     return None
 
 
-class ThalesAccessJWTAuth(SuspendAwareJWTAuth):
-    """JWT authentication for the Thales API.
+class WatsonCrickAccessJWTAuth(SuspendAwareJWTAuth):
+    """JWT authentication for the WatsonCrick API.
 
     Accepts either the normal ``Authorization: Bearer`` header or the
     ``auth-token`` cookie forwarded by the Next.js proxy. Authentication is not
-    enough on its own: the user must also hold the Thales permission, so the
+    enough on its own: the user must also hold the WatsonCrick permission, so the
     API cannot be used by every logged-in blog account.
     """
 
@@ -115,38 +115,38 @@ class ThalesAccessJWTAuth(SuspendAwareJWTAuth):
                 return None
             user = self.authenticate(request, raw)
 
-        if user and not has_thales_access(user):
-            raise HttpError(403, "Thales access required")
+        if user and not has_watsoncrick_access(user):
+            raise HttpError(403, "Watson-Crick access required")
         return user
 
 
-def thales_page_gate(request):
-    """The blog's injected THALES_PAGE_GATE: guard for the Thales SPA index.
+def watsoncrick_page_gate(request):
+    """The blog's injected WATSONCRICK_PAGE_GATE: guard for the WatsonCrick SPA index.
 
     Resolves the user from the blog's HttpOnly JWT cookies, sends
     unauthenticated visitors to the site's login page with a return path so
-    they land back in the lab, and 403s logged-in users without the Thales
+    they land back in the lab, and 403s logged-in users without the WatsonCrick
     permission. Returns None when the lab may be served; any other return
     value is the response to send instead.
 
     The lab app itself never imports this — home/settings.py points
-    settings.THALES_PAGE_GATE here, and thales/access.py resolves it.
+    settings.WATSONCRICK_PAGE_GATE here, and watsoncrick/access.py resolves it.
     """
     user = user_from_session_cookies(request)
     if user is None:
-        login_url = f"{settings.FRONTEND_URL.rstrip('/')}/login?next=/thales/"
+        login_url = f"{settings.FRONTEND_URL.rstrip('/')}/login?next=/thales/watsoncrick/"
         return redirect(login_url)
 
-    if not has_thales_access(user):
+    if not has_watsoncrick_access(user):
         return HttpResponseForbidden(
-            "Your account does not have access to the Thales lab."
+            "Your account does not have access to the Watson-Crick lab."
         )
 
     return None
 
 
-def thales_advisor_page_gate(request):
-    """The blog's injected THALES_ADVISOR_PAGE_GATE for /thales/advisor/.
+def watsoncrick_advisor_page_gate(request):
+    """The blog's injected WATSONCRICK_ADVISOR_PAGE_GATE for /thales/watsoncrick/advisor/.
 
     Advisors are ordinary lab members with an extra capability, so the page
     requires a valid session and the advisor permission. A member without the
@@ -154,7 +154,7 @@ def thales_advisor_page_gate(request):
     """
     user = user_from_session_cookies(request)
     if user is None:
-        login_url = f"{settings.FRONTEND_URL.rstrip('/')}/login?next=/thales/advisor/"
+        login_url = f"{settings.FRONTEND_URL.rstrip('/')}/login?next=/thales/watsoncrick/advisor/"
         return redirect(login_url)
 
     if not has_advisor_access(user):

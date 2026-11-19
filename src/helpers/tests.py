@@ -23,13 +23,13 @@ class ApiRedirectNoStoreMiddlewareTests(SimpleTestCase):
 
     def test_api_redirect_is_no_store(self):
         response = self._run(
-            '/api/thales/hypothesis', HttpResponsePermanentRedirect('/api/thales/hypothesis/')
+            '/api/watsoncrick/hypothesis', HttpResponsePermanentRedirect('/api/watsoncrick/hypothesis/')
         )
         self.assertEqual(response['Cache-Control'], 'no-store, max-age=0')
 
     def test_non_api_redirect_is_untouched(self):
         response = self._run(
-            '/thales', HttpResponsePermanentRedirect('/thales/')
+            '/thales/watsoncrick', HttpResponsePermanentRedirect('/thales/watsoncrick/')
         )
         self.assertFalse(response.has_header('Cache-Control'))
 

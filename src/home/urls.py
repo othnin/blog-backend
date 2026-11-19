@@ -21,18 +21,18 @@ from django.conf.urls.static import static
 from .api import api
 from .blog_admin import blog_admin_site
 from .views import health_check
-from thales.spa import thales_advisor_index, thales_asset, thales_index
+from watsoncrick.spa import watsoncrick_advisor_index, watsoncrick_asset, watsoncrick_index
 
 urlpatterns = [
     path("django-admin/", blog_admin_site.urls),
-    # The Thales lab is a Vite app built into thales/static/. Django serves it
+    # The WatsonCrick lab is a Vite app built into watsoncrick/static/. Django serves it
     # so the lab shares an origin with the API. Both routes live under a single
-    # /thales/ prefix, which is the whole reason the feature is easy to detach
-    # later - see docs/THALES_INTEGRATION.md.
+    # /thales/watsoncrick/ prefix, which is the whole reason the feature is easy to detach
+    # later - see docs/WATSONCRICK_INTEGRATION.md.
     # The advisor dashboard is the same bundle behind a stricter gate.
-    path("thales/advisor/", thales_advisor_index),
-    path("thales/", thales_index),
-    path("thales/assets/<path:filename>", thales_asset),
+    path("thales/watsoncrick/advisor/", watsoncrick_advisor_index),
+    path("thales/watsoncrick/", watsoncrick_index),
+    path("thales/watsoncrick/assets/<path:filename>", watsoncrick_asset),
     # Register both spellings. Railway's healthcheck and the frontend proxy both
     # request the no-slash form, and Django's APPEND_SLASH would otherwise 301 to
     # the slash form - which the Next.js /api/:path* rewrite strips again,

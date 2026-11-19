@@ -110,7 +110,7 @@ class ApiRedirectNoStoreMiddleware:
     trailing slash again, so that 301 points at the exact URL the browser just
     requested. Browsers cache a 301 permanently, which pins the URL into an
     ``ERR_TOO_MANY_REDIRECTS`` loop even after the proxy is fixed - that is
-    what happened to /api/thales/* before the Next.js middleware learned to
+    what happened to /api/watsoncrick/* before the Next.js middleware learned to
     preserve the slash.
 
     API responses are dynamic and must never be permanently cached, so mark

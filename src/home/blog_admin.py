@@ -20,7 +20,7 @@ class BlogAdminSite(AdminSite):
 
     def each_context(self, request):
         context = super().each_context(request)
-        context['thales_help_available'] = True
+        context['watsoncrick_help_available'] = True
         return context
 
 

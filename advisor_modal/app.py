@@ -1,6 +1,6 @@
-"""The thales advisor's production brain: Ollama + phi4-mini on Modal.
+"""The watsoncrick advisor's production brain: Ollama + phi4-mini on Modal.
 
-The advisor in src/thales/advisor/ talks to whatever answers at
+The advisor in src/watsoncrick/advisor/ talks to whatever answers at
 OLLAMA_BASE_URL. In local dev that is a laptop Ollama on
 http://localhost:11434; in production it is this app. The URL is the only
 wiring -- no backend code changes are involved in either case.

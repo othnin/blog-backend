@@ -90,7 +90,7 @@ INSTALLED_APPS = [
     "blog",
     "recipes",
     "locations",
-    "thales",
+    "watsoncrick",
 ]
 
 MIDDLEWARE = [
@@ -428,11 +428,11 @@ NUM_TRUSTED_PROXIES = config("NUM_TRUSTED_PROXIES", cast=int, default=1)
 
 # Content Security Policy
 #
-# The Thales lab index (thales-frontend/index.html) loads its two display fonts
+# The WatsonCrick lab index (watsoncrick-frontend/index.html) loads its two display fonts
 # from Google Fonts. Without these two hosts the stylesheet is blocked by
 # style-src (falling back from style-src-elem) and the font files by font-src,
 # so the lab silently drops to fallback typography. Keep these in step with
-# thales-frontend/index.html if the font link changes.
+# watsoncrick-frontend/index.html if the font link changes.
 CSP_DEFAULT_SRC = ("'self'",)
 CSP_SCRIPT_SRC = ("'self'",)
 CSP_STYLE_SRC = ("'self'", "'unsafe-inline'", "https://fonts.googleapis.com")
@@ -441,16 +441,16 @@ CSP_FONT_SRC = ("'self'", "https://fonts.gstatic.com")
 CSP_CONNECT_SRC = ("'self'",)
 CSP_FRAME_ANCESTORS = ("'none'",)
 
-# Thales injection seams — see docs/THALES_INTEGRATION.md, "Portability
-# seams". The lab app (src/thales/) resolves both through thales/access.py
+# WatsonCrick injection seams — see docs/WATSONCRICK_INTEGRATION.md, "Portability
+# seams". The lab app (src/watsoncrick/) resolves both through watsoncrick/access.py
 # and imports nothing from this project; these two dotted paths are how the
-# blog injects its own policy (JWT cookies plus the Thales group check). A
+# blog injects its own policy (JWT cookies plus the WatsonCrick group check). A
 # Django project that omits them gets the portable defaults defined inside
 # the app instead.
-THALES_API_AUTH = "helpers.api_auth.ThalesAccessJWTAuth"
-THALES_PAGE_GATE = "helpers.api_auth.thales_page_gate"
-THALES_ADVISOR_CHECK = "auth_app.permissions.has_advisor_access"
-THALES_ADVISOR_PAGE_GATE = "helpers.api_auth.thales_advisor_page_gate"
+WATSONCRICK_API_AUTH = "helpers.api_auth.WatsonCrickAccessJWTAuth"
+WATSONCRICK_PAGE_GATE = "helpers.api_auth.watsoncrick_page_gate"
+WATSONCRICK_ADVISOR_CHECK = "auth_app.permissions.has_advisor_access"
+WATSONCRICK_ADVISOR_PAGE_GATE = "helpers.api_auth.watsoncrick_advisor_page_gate"
 
 # Logging — console in dev, console + rotating file in production
 #
@@ -542,8 +542,8 @@ LOGGING = {
         'blog': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'recipes': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
         'auth_app': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
-        'thales': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
-        'thales.advisor.debug': {
+        'watsoncrick': {'handlers': _log_handlers, 'level': 'INFO', 'propagate': False},
+        'watsoncrick.advisor.debug': {
             'handlers': _debug_llm_handlers,
             'level': 'DEBUG',
             'propagate': False,

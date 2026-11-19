@@ -4,7 +4,7 @@ Admin configuration for authentication models.
 from django.contrib import admin
 from home.blog_admin import blog_admin_site
 from auth_app.models import EmailVerificationToken, PasswordResetToken, UserProfile
-from auth_app.permissions import has_thales_access
+from auth_app.permissions import has_watsoncrick_access
 
 
 class EmailVerificationTokenAdmin(admin.ModelAdmin):
@@ -30,30 +30,30 @@ class PasswordResetTokenAdmin(admin.ModelAdmin):
 
 
 class UserProfileAdmin(admin.ModelAdmin):
-    list_display = ('user', 'email_verified', 'created_at', 'updated_at', 'role', 'thales_access', 'avatar')
+    list_display = ('user', 'email_verified', 'created_at', 'updated_at', 'role', 'watsoncrick_access', 'avatar')
     list_filter = ('email_verified', 'created_at', 'role')
     search_fields = ('user__email', 'user__username')
-    readonly_fields = ('created_at', 'updated_at', 'thales_access_help')
+    readonly_fields = ('created_at', 'updated_at', 'watsoncrick_access_help')
 
-    @admin.display(boolean=True, description='Thales access')
-    def thales_access(self, obj):
-        """Show the permission granted by the Thales group (admins bypass it)."""
-        return has_thales_access(obj.user)
+    @admin.display(boolean=True, description='WatsonCrick access')
+    def watsoncrick_access(self, obj):
+        """Show the permission granted by the WatsonCrick group (admins bypass it)."""
+        return has_watsoncrick_access(obj.user)
 
-    def thales_access_help(self, obj=None):
+    def watsoncrick_access_help(self, obj=None):
         from django.utils.safestring import mark_safe
-        status = '<span style="color:green">✓ Has access</span>' if obj and has_thales_access(obj.user) else '<span style="color:#999">✗ No access</span>'
+        status = '<span style="color:green">✓ Has access</span>' if obj and has_watsoncrick_access(obj.user) else '<span style="color:#999">✗ No access</span>'
         html = (
-            '<div class="thales-help-card">'
-            '<h3>🔬 Thales Lab Access</h3>'
+            '<div class="watsoncrick-help-card">'
+            '<h3>🔬 WatsonCrick Lab Access</h3>'
             '<p><strong>Current status:</strong> %s</p>'
-            '<p>Grant access by adding this user to the <strong>Thales</strong> group. '
+            '<p>Grant access by adding this user to the <strong>WatsonCrick</strong> group. '
             'Admins (superuser or role=admin) bypass the group automatically.</p>'
-            '<button type="button" class="thales-help-btn" onclick="showThalesHelp()">View Step-by-Step Instructions</button>'
+            '<button type="button" class="watsoncrick-help-btn" onclick="showWatsonCrickHelp()">View Step-by-Step Instructions</button>'
             '</div>'
         ) % status
         return mark_safe(html)
-    thales_access_help.short_description = "Thales Access Guide"
+    watsoncrick_access_help.short_description = "WatsonCrick Access Guide"
 
     fieldsets = (
         (None, {
@@ -63,8 +63,8 @@ class UserProfileAdmin(admin.ModelAdmin):
             'fields': ('created_at', 'updated_at'),
             'classes': ('collapse',)
         }),
-        ('Thales Access', {
-            'fields': ('thales_access_help',),
+        ('WatsonCrick Access', {
+            'fields': ('watsoncrick_access_help',),
         }),
     )
 
