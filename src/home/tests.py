@@ -15,6 +15,7 @@ directory in the image. Removing it broke the deploy with:
 
 Settings now creates the directory and falls back to console-only if it cannot.
 """
+import json
 import os
 import shutil
 import subprocess
@@ -455,3 +456,33 @@ class ContentSecurityPolicyTests(SimpleTestCase):
             policy,
         )
         self.assertIn("font-src 'self' https://fonts.gstatic.com", policy)
+
+
+class OpenAPISchemaTests(SimpleTestCase):
+    """
+    Regression guard for the django-ninja 1.8.0 / ninja-extra incompatibility.
+
+    1.8.0 added webhook collection that reads ``bound_router.template.webhooks``
+    for every bound router. ninja-extra's ``ControllerBoundRouter`` (used by all
+    of our controllers) has no ``template`` attribute, so schema generation
+    raised AttributeError and /api/openapi.json returned 500 in production.
+    requirements.txt caps django-ninja below 1.8.0 until the upstream fix lands;
+    this test verifies the endpoint still works with the installed version.
+    """
+
+    def test_openapi_json_renders_with_extra_controllers(self):
+        response = self.client.get('/api/openapi.json')
+        self.assertEqual(response.status_code, 200)
+
+        paths = json.loads(response.content)['paths']
+        # Both plain routers and ninja-extra controllers must be documented;
+        # the latter are what triggered the AttributeError.
+        self.assertTrue(
+            any(path.endswith('/hello') for path in paths),
+            f'plain router route missing from schema: {sorted(paths)}',
+        )
+        for prefix in ('/blog', '/recipes'):
+            self.assertTrue(
+                any(prefix in path for path in paths),
+                f'{prefix} controller routes missing from schema: {sorted(paths)}',
+            )
